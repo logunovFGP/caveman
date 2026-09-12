@@ -65,7 +65,11 @@ function pathWithout(binNames) {
 
 function runInstaller(args, configDir, extraEnv = {}) {
   return spawnSync(process.execPath, [INSTALLER, ...args, '--config-dir', configDir, '--non-interactive', '--no-mcp-shrink'], {
-    env: { ...process.env, CLAUDE_CONFIG_DIR: configDir, NO_COLOR: '1', ...extraEnv },
+// CLINE_DIR / HERMES_HOME are pinned under the throwaway config dir so a real
+// `--uninstall` in these tests cannot reach the developer's own ~/.cline or
+// ~/.hermes install. Only CLAUDE_CONFIG_DIR used to be sandboxed, and the
+// native lanes resolve their roots from os.homedir(), not from --config-dir.
+    env: { ...process.env, CLAUDE_CONFIG_DIR: configDir, CLINE_DIR: path.join(configDir, 'cline-sandbox'), HERMES_HOME: path.join(configDir, 'hermes-sandbox'), NO_COLOR: '1', ...extraEnv },
     encoding: 'utf8',
   });
 }
@@ -768,10 +772,21 @@ test('openclaw uninstall removes skill folder + strips SOUL.md block, preserving
   const userContent = '# my workspace\n\nfoo bar baz\n';
   fs.writeFileSync(path.join(ws, 'SOUL.md'), userContent);
   try {
-    const env = { ...process.env, OPENCLAW_WORKSPACE: ws, NO_COLOR: '1' };
+    // OPENCLAW_WORKSPACE redirects the lane under test; CLINE_DIR and HERMES_HOME
+    // redirect the other two home-dir-rooted lanes. `--uninstall` prunes every
+    // native lane, and those two resolve their roots from os.homedir(), so
+    // without this the run reaches the developer's own ~/.cline and ~/.hermes.
+    const env = {
+      ...process.env,
+      OPENCLAW_WORKSPACE: ws,
+      CLINE_DIR: path.join(dir, 'cline-sandbox'),
+      HERMES_HOME: path.join(dir, 'hermes-sandbox'),
+      NO_COLOR: '1',
+    };
     spawnSync(process.execPath, [INSTALLER, '--only', 'openclaw', '--non-interactive', '--no-mcp-shrink', '--config-dir', dir], { env, encoding: 'utf8' });
 
     // Strip claude/gemini from PATH so uninstall doesn't touch real plugins.
+    // (PATH-scoped lanes only — the home-dir lanes are handled by env above.)
     const cleanPath = pathWithout(['claude', 'gemini']);
     const r = spawnSync(process.execPath, [INSTALLER, '--uninstall', '--non-interactive', '--no-mcp-shrink', '--config-dir', dir], {
       env: { ...env, PATH: cleanPath },

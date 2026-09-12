@@ -42,8 +42,17 @@ function shimOpencode() {
 
 function runInstaller(args, env) {
   const configDir = path.join(env.XDG_CONFIG_HOME, 'claude-test');
+  // CLINE_DIR / HERMES_HOME are pinned inside the throwaway XDG root because
+  // `--uninstall` prunes every native lane, and those lanes resolve their roots
+  // from os.homedir() rather than from --config-dir or XDG_CONFIG_HOME. Without
+  // this a test run reaches the developer's own ~/.cline and ~/.hermes install.
+  const sandboxed = {
+    CLINE_DIR: path.join(env.XDG_CONFIG_HOME, 'cline-sandbox'),
+    HERMES_HOME: path.join(env.XDG_CONFIG_HOME, 'hermes-sandbox'),
+    ...env,
+  };
   return spawnSync(process.execPath, [INSTALLER, ...args, '--config-dir', configDir, '--non-interactive', '--no-mcp-shrink'], {
-    env, encoding: 'utf8',
+    env: sandboxed, encoding: 'utf8',
   });
 }
 
