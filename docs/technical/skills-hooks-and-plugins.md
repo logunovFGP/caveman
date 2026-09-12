@@ -70,11 +70,18 @@ Some agents do not expose equivalent hooks. Their profiles use native plugins:
 
 - Hermes Agent plugin;
 - OpenClaw plugin;
-- OpenCode plugin.
+- OpenCode plugin;
+- Cline native install.
 
 OpenCode integration listens to native session and prompt events and can use
 project `AGENTS.md` instructions. Plugins remain subject to host agent's plugin
 permissions and version compatibility.
+
+Cline has no usable hook surface for this purpose: its file hooks run detached
+and their stdout is discarded, so a mode tracker cannot return context. The Cline
+integration is therefore file-only — skills, an always-on rule, and subagent
+presets copied into the three directories Cline scans. There is no mode switching
+and no statusline badge.
 
 ## Browser extension
 

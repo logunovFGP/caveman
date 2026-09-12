@@ -50,7 +50,7 @@ If you want to install for one agent (or want to know exactly what command runs 
 | **Codex CLI** | `npx skills add JuliusBrussee/caveman -a codex` | Per-session: `/caveman` |
 | **Cursor** | `npx skills add JuliusBrussee/caveman -a cursor -g` | Per-session by default; `--with-init` for an always-on rule file |
 | **Windsurf** | `npx skills add JuliusBrussee/caveman -a windsurf` | Per-session by default; `--with-init` for an always-on rule file |
-| **Cline** | `npx skills add JuliusBrussee/caveman -a cline` | Per-session by default; `--with-init` for an always-on rule file |
+| **Cline** | `npx -y github:JuliusBrussee/caveman -- --only cline` *(or `node bin/install.js --only cline` from a clone)* | Yes (global rule + native skills + cavecrew subagents) |
 | **GitHub Copilot** *(soft probe)* | `npx -y github:JuliusBrussee/caveman -- --only copilot --with-init` | Repo-wide instructions via `--with-init` |
 | **Continue** | `npx skills add JuliusBrussee/caveman -a continue` | No — say `/caveman` |
 | **Kilo Code** | `npx skills add JuliusBrussee/caveman -a kilo` | No |
@@ -136,7 +136,7 @@ Useful flags:
 
 ## Always-on rules
 
-For agents without a hook system (Cursor, Windsurf, Cline, Copilot, and friends), the always-on path is a static rule file. Two ways:
+For agents without a hook system (Cursor, Windsurf, Copilot, and friends), the always-on path is a static rule file. Two ways:
 
 ```bash
 # Drop rule files into the current repo
@@ -202,6 +202,7 @@ What it removes:
 - The Claude Code plugin and the Gemini CLI extension (if installed).
 - The opencode native plugin (`~/.config/opencode/plugins/caveman/`, the `plugin` and `mcp.caveman-shrink` entries from `opencode.json`, our skill/agent/command files, the caveman block from `AGENTS.md`, and the opencode flag file).
 - The OpenClaw workspace skill folder and the marker-fenced block from `~/.openclaw/workspace/SOUL.md` (when present).
+- The Cline native install under `~/.cline` (or `$CLINE_DIR`): our six `skills/` folders, `rules/caveman.md`, and the three `agents/cavecrew-*.yaml` presets. Only files we installed and you haven't edited are removed — the ownership journal is the record, so your own skills and agents in those folders are never touched.
 - All mode state in `$CLAUDE_CONFIG_DIR`: the `.caveman-sessions/` directory (one file per window), `.caveman-active`, `.caveman-active.prev`, `.caveman-mode-log.jsonl`, `.caveman-statusline-suffix`, and `.caveman-nudge-shown`.
 
 What it does **not** remove:
