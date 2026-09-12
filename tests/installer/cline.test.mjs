@@ -24,7 +24,15 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '..', '..');
 const INSTALLER = path.join(REPO_ROOT, 'bin', 'install.js');
 
-const SKILLS = ['caveman', 'caveman-commit', 'caveman-review', 'caveman-help', 'caveman-compress', 'cavecrew'];
+// Derived, not hardcoded: the lane auto-discovers skills/ so that a skill added
+// later ships without anyone remembering to edit a list. The test mirrors that
+// rule rather than pinning a snapshot, and asserts the derivation separately.
+const EXCLUDED = ['caveman-stats'];
+const SKILLS = fs.readdirSync(path.join(REPO_ROOT, 'skills'), { withFileTypes: true })
+  .filter((e) => e.isDirectory() && !EXCLUDED.includes(e.name))
+  .filter((e) => fs.existsSync(path.join(REPO_ROOT, 'skills', e.name, 'SKILL.md')))
+  .map((e) => e.name)
+  .sort();
 const AGENTS = ['cavecrew-investigator.yaml', 'cavecrew-builder.yaml', 'cavecrew-reviewer.yaml'];
 const JOURNAL = '.caveman-cline-ownership.json';
 
@@ -75,6 +83,32 @@ test('cline fresh install lands skills, the always-on rule, and cavecrew agents'
     assert.equal(fs.existsSync(path.join(root, 'agents', 'cavecrew-builder.md')), false);
 
     assert.ok(fs.existsSync(path.join(root, JOURNAL)), 'ownership journal not written');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+// ── 1b. The lane ships the WHOLE skill set, not a stale hand-maintained slice ──
+// Regression guard for the first cut of this lane, which copied the Hermes
+// lane's 6-skill list and silently dropped 13 shippable skills — every
+// token-discipline work pattern and every Caveman Cloud driver.
+test('cline ships every skill except the hook-delivered one', () => {
+  const home = freshHome();
+  try {
+    assert.ok(SKILLS.length >= 19, `expected the full skill set, derived only ${SKILLS.length}`);
+    for (const name of ['investigate-first', 'lean-build', 'migration', 'safe-refactor', 'surgical-patch', 'verify-and-stop']) {
+      assert.ok(SKILLS.includes(name), `work-pattern skill ${name} missing from the derived set`);
+    }
+    for (const name of ['caveman-setup', 'caveman-discover', 'caveman-learn', 'caveman-manage', 'caveman-optimize', 'caveman-evidence-review']) {
+      assert.ok(SKILLS.includes(name), `cloud driver skill ${name} missing from the derived set`);
+    }
+    // skills/generated/ holds native packs, not a SKILL.md — it must not ship.
+    assert.equal(SKILLS.includes('generated'), false, 'skills/generated is not a skill');
+
+    const r = runInstaller(['--only', 'cline'], home);
+    assert.equal(r.status, 0, r.stderr);
+    const installed = fs.readdirSync(path.join(clineDir(home), 'skills')).sort();
+    assert.deepEqual(installed, SKILLS, 'installed skill set does not match the derived set');
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }

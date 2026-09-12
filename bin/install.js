@@ -798,12 +798,30 @@ function installHermes(ctx) {
 // So unlike the `npx skills add` lane this replaced, the always-on ruleset does
 // not need a per-repo .clinerules file: the global rule covers every workspace.
 //
-// caveman-stats is deliberately NOT shipped here. Its SKILL.md documents itself
+// Skills are auto-discovered from skills/, the same wholesale rule the Claude
+// Code plugin uses — a hand-maintained list (what the Hermes and opencode lanes
+// carry) silently stops shipping every skill added after it was written. Any
+// skills/<name>/SKILL.md ships; skills/generated/ has no SKILL.md and so
+// self-excludes.
+//
+// caveman-stats is the one deliberate exclusion. Its SKILL.md documents itself
 // as hook-delivered (the Claude Code UserPromptSubmit hook returns the numbers);
 // Cline's file hooks run detached with stdout ignored, so /caveman-stats would
 // load a skill that can never produce output.
-const CLINE_SKILL_DIRS  = ['caveman', 'caveman-commit', 'caveman-review', 'caveman-help', 'caveman-compress', 'cavecrew'];
+const CLINE_SKILL_EXCLUDE = new Set(['caveman-stats']);
 const CLINE_AGENT_FILES = ['cavecrew-investigator.md', 'cavecrew-builder.md', 'cavecrew-reviewer.md'];
+
+function clineSkillDirs(repoRoot) {
+  const skillsRoot = path.join(repoRoot, 'skills');
+  let entries;
+  try { entries = fs.readdirSync(skillsRoot, { withFileTypes: true }); }
+  catch (_) { return []; }
+  return entries
+    .filter((e) => e.isDirectory() && !CLINE_SKILL_EXCLUDE.has(e.name))
+    .filter((e) => fs.existsSync(path.join(skillsRoot, e.name, 'SKILL.md')))
+    .map((e) => e.name)
+    .sort();
+}
 
 function clineConfigDir() {
   // Mirrors cline's own resolveClineDir(): $CLINE_DIR wins, else ~/.cline.
@@ -828,10 +846,13 @@ function installCline(ctx) {
 
   const root = clineConfigDir();
 
+  const skillDirs = clineSkillDirs(repoRoot);
+
   if (opts.dryRun) {
-    note(`  would copy ${CLINE_SKILL_DIRS.length} skill dirs into ${path.join(root, 'skills')}/`);
+    note(`  would copy ${skillDirs.length} skill dirs into ${path.join(root, 'skills')}/`);
     note(`  would write ${path.join(root, 'rules', 'caveman.md')}`);
     note(`  would write ${CLINE_AGENT_FILES.length} cavecrew agents into ${path.join(root, 'agents')}/`);
+    if (opts.withMcpShrink) note(`  would run: cline mcp add caveman-shrink --yes -- npx -y ${MCP_SHRINK_PKG} ${opts.withMcpShrink.join(' ')}`);
     results.installed.push('cline');
     process.stdout.write('\n');
     return;
@@ -840,7 +861,7 @@ function installCline(ctx) {
   try {
     const operations = [];
 
-    for (const skillDir of CLINE_SKILL_DIRS) {
+    for (const skillDir of skillDirs) {
       const srcDir = path.join(repoRoot, 'skills', skillDir);
       if (!fs.existsSync(srcDir)) {
         warn(`  skill dir not found: ${srcDir}`);
@@ -893,9 +914,52 @@ function installCline(ctx) {
     results.installed.push('cline');
   } catch (err) {
     results.failed.push(['cline', 'copy failed: ' + err.message]);
+    process.stdout.write('\n');
+    return;
+  }
+
+  if (opts.withMcpShrink) {
+    say('  → wiring caveman-shrink MCP proxy (--with-mcp-shrink)');
+    const r = installClineMcpShrink(ctx);
+    if (r.kind === 'ok')   results.installed.push('caveman-shrink (cline)');
+    if (r.kind === 'skip') results.skipped.push(['caveman-shrink (cline)', r.why]);
+    if (r.kind === 'fail') results.failed.push(['caveman-shrink (cline)', r.why]);
   }
 
   process.stdout.write('\n');
+}
+
+// Cline's own MCP registry. `cline mcp add` opens an interactive wizard unless
+// --yes is passed, which would hang a `curl | bash` install; --yes is therefore
+// mandatory here, not optional. Same npm probe and same clean-skip policy as the
+// Claude Code path in installMcpShrink().
+function installClineMcpShrink(ctx) {
+  const { note, warn, opts } = ctx;
+  const probe = captureSpawn('npm', ['view', MCP_SHRINK_PKG, 'name']);
+  if (probe.status !== 0) {
+    warn(`    'npm view ${MCP_SHRINK_PKG}' returned no metadata — registry unreachable or package missing.`);
+    note('    Skipping registration. Re-run --with-mcp-shrink when the registry is reachable.');
+    return { kind: 'skip', why: 'npm registry probe failed' };
+  }
+  const help = captureSpawn('cline', ['mcp', '--help']);
+  if (help.status !== 0) {
+    note("    'cline mcp add' not available on this CLI (VS Code-only install?).");
+    note('    Add caveman-shrink through the Cline MCP settings UI instead.');
+    return { kind: 'skip', why: 'cline mcp CLI unavailable' };
+  }
+  const upstream = opts.withMcpShrink;
+  const r = runSpawn(
+    'cline',
+    ['mcp', 'add', 'caveman-shrink', '--yes', '--transport', 'stdio', '--', 'npx', '-y', MCP_SHRINK_PKG, ...upstream],
+    null, opts.dryRun
+  );
+  if (spawnOk(r)) {
+    note(`    registered, wrapping: ${upstream.join(' ')}`);
+    note('    `cline mcp remove caveman-shrink` to drop it.');
+    note(`    Docs: https://github.com/${REPO}/tree/main/src/mcp-servers/caveman-shrink`);
+    return { kind: 'ok' };
+  }
+  return { kind: 'fail', why: 'cline mcp add failed' };
 }
 
 // ── opencode native install ───────────────────────────────────────────────
