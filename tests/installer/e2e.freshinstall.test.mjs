@@ -299,7 +299,32 @@ test('fresh install populates hooks dir and settings.json (skipped without `clau
   }
 });
 
-test('standalone hooks keep a stable PATH node symlink', { skip: process.platform === 'win32' && 'POSIX symlink behavior' }, () => {
+// The symlink test hard-links process.execPath into a temp tree and executes
+// it, which assumes the running node is relocatable. Homebrew's is not: it is
+// dynamically linked against @rpath/libnode.<abi>.dylib inside the Cellar, so a
+// copy outside that tree dies with `Library not loaded` before the installer
+// runs, and the test fails on a missing settings.json rather than on anything
+// it means to assert. nvm/mise builds relocate fine. Probe once, and say why
+// when skipping instead of leaving a contributor to decode a dyld error.
+const RELOCATABLE_NODE = (() => {
+  if (process.platform === 'win32') return false;
+  const probe = fs.mkdtempSync(path.join(os.tmpdir(), 'caveman-node-probe-'));
+  try {
+    const copy = path.join(probe, 'node');
+    fs.linkSync(process.execPath, copy);
+    return spawnSync(copy, ['-e', ''], { encoding: 'utf8' }).status === 0;
+  } catch (_) {
+    return false;
+  } finally {
+    fs.rmSync(probe, { recursive: true, force: true });
+  }
+})();
+
+const NODE_SKIP = process.platform === 'win32'
+  ? 'POSIX symlink behavior'
+  : (RELOCATABLE_NODE ? false : `this node is not relocatable (${process.execPath}) — see the comment above`);
+
+test('standalone hooks keep a stable PATH node symlink', { skip: NODE_SKIP }, () => {
   const dir = freshTmpDir();
   const cellarBin = path.join(dir, 'Cellar', 'node', '26.5.0', 'bin');
   const upgradedCellarBin = path.join(dir, 'Cellar', 'node', '26.8.1', 'bin');
