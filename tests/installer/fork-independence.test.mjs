@@ -60,6 +60,14 @@ test('a default install run names upstream nowhere', () => {
   }
 });
 
+// --help is copy-paste surface: an example naming upstream installs upstream.
+test('the help text names no upstream slug', () => {
+  const r = spawnSync(process.execPath, [path.join(REPO_ROOT, 'bin', 'install.js'), '--help'], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  const body = r.stdout.replace(/--repo JuliusBrussee\/caveman/g, '');
+  assert.doesNotMatch(body, /JuliusBrussee/, 'a help example still points upstream');
+});
+
 test('upstream is still reachable on request', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'caveman-fork-up-'));
   try {
