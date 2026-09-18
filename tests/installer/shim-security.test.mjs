@@ -31,7 +31,7 @@ test("stdin shell install never executes caller cwd bin/install.js", { skip: pro
   });
   assert.equal(result.status, 0, result.stderr);
   assert.doesNotMatch(result.stdout, /bad/);
-  assert.match(result.stdout, /^-y\ngithub:JuliusBrussee\/caveman#v3\.4\.5\n--help$/m);
+  assert.match(result.stdout, /^-y\ngithub:logunovFGP\/caveman#v3\.4\.5\n--help$/m);
   assert.equal(spawnSync("test", ["-e", marker]).status, 1, "caller payload must not execute");
 });
 
@@ -63,7 +63,7 @@ test("every bootstrap pin names the same release", () => {
 
   for (const doc of ["README.md", "INSTALL.md"]) {
     const text = readFileSync(join(root, doc), "utf8");
-    const refs = [...text.matchAll(/raw\.githubusercontent\.com\/JuliusBrussee\/caveman\/(v[\d.]+)\//g)].map((m) => m[1]);
+    const refs = [...text.matchAll(/raw\.githubusercontent\.com\/logunovFGP\/caveman\/(v[\w.-]+)\//g)].map((m) => m[1]);
     assert.ok(refs.length > 0, `${doc} must carry at least one pinned install one-liner`);
     for (const ref of refs) assert.equal(ref, pins["install.sh"], `${doc} one-liner pins ${ref}`);
   }

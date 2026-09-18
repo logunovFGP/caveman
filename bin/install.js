@@ -35,7 +35,7 @@ const { parseCommandArgs } = require('./lib/command-args');
 // extension URL, npx skills add, raw hook downloads) at a fork. The four
 // derived URLs below are reassigned together in setRepo(); nothing may capture
 // them at module load.
-let REPO = 'JuliusBrussee/caveman';
+let REPO = 'logunovFGP/caveman';
 // Mirrors the `engines.node` floor in package.json. Hardcoded rather than read
 // from disk because this file also runs detached from a checkout (the curl
 // fallback path); `tests/installer/node-floor.test.mjs` fails the build if the
@@ -47,7 +47,7 @@ const MIN_NODE_MAJOR = 18;
 // the new tag on every release (CI release step) AFTER regenerating
 // src/hooks/checksums.sha256 so the integrity manifest matches the ref.
 // Overridable via CAVEMAN_REF for testing against a branch.
-const PINNED_REF = process.env.CAVEMAN_REF || 'v2.7.0';
+const PINNED_REF = process.env.CAVEMAN_REF || 'v2.7.0-fork.1';
 const OPENCLAW_SKILL_VERSION = /^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(PINNED_REF)
   ? PINNED_REF.replace(/^v/, '')
   : undefined;
@@ -724,6 +724,7 @@ function installViaSkills(ctx, prov) {
   if (PROVIDER_SKILLS.usesNativeSkills(prov.id)) {
     try {
       const installed = PROVIDER_SKILLS.install({
+        repo: REPO,
         provider: prov.id,
         repoRoot: ctx.repoRoot,
         force: opts.force,
@@ -2085,8 +2086,9 @@ FLAGS
   --uninstall, -u       Remove caveman from this machine.
   --repo <owner>/<name> Pull the remote lanes (Claude Code marketplace, Gemini
                         extension, npx skills, raw hook downloads) from this
-                        GitHub repo instead of JuliusBrussee/caveman. Native
-                        lanes always copy from the local clone.
+                        GitHub repo instead of the default (logunovFGP/caveman).
+                        Use --repo JuliusBrussee/caveman to install upstream.
+                        Native lanes always copy from the local clone.
   --config-dir <path>   Claude Code config dir for hook files + settings.json.
                         Default: \$CLAUDE_CONFIG_DIR or ~/.claude. Does NOT
                         scope \`claude plugin install\`, \`gemini extensions

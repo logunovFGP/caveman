@@ -5,7 +5,9 @@ const os = require('os');
 const path = require('path');
 const OWNED = require('./owned-install');
 
-const REPO = 'JuliusBrussee/caveman';
+// Default only. bin/install.js passes its own (possibly --repo'd) slug so
+// this lane cannot silently fall back to a different repo than the rest.
+const DEFAULT_REPO = 'logunovFGP/caveman';
 
 function usesNativeSkills(provider, env = process.env) {
   return provider === 'continue' || provider === 'aider-desk' ||
@@ -74,7 +76,7 @@ function ownershipOptions(provider, root) {
 // run uses the installer's portable process launcher; staging never targets HOME.
 function install({
   provider, root = skillsRoot(provider), repoRoot, force = false, dryRun = false,
-  note = () => {}, run,
+  note = () => {}, run, repo = DEFAULT_REPO,
 }) {
   const ownership = ownershipOptions(provider, root);
   if (dryRun) {
@@ -92,7 +94,7 @@ function install({
       // The universal profile is only a disposable download destination. --copy
       // materializes every selected skill without touching any agent profile.
       const result = run('npx', [
-        '-y', 'skills', 'add', REPO, '--skill', '*', '-a', 'codex', '--yes', '--copy',
+        '-y', 'skills', 'add', repo, '--skill', '*', '-a', 'codex', '--yes', '--copy',
       ], { cwd: temporary });
       if (!result || result.status !== 0 || result.error || result.signal) {
         throw new Error(`skill download failed${result?.error?.message ? `: ${result.error.message}` : ''}`);

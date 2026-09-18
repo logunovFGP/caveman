@@ -33,7 +33,7 @@ for (const { id, profile } of profiles) {
     });
     assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.deepEqual(JSON.parse(fs.readFileSync(log, 'utf8')), [
-      '-y', 'skills', 'add', 'JuliusBrussee/caveman', '--skill', '*', '-a', profile, '--yes', ...(projectOnly ? [] : ['-g']),
+      '-y', 'skills', 'add', 'logunovFGP/caveman', '--skill', '*', '-a', profile, '--yes', ...(projectOnly ? [] : ['-g']),
     ]);
     if (projectOnly) assert.ok(result.stdout.includes(`Installing into this project: ${fs.realpathSync(cwd)}`), result.stdout);
     assert.deepEqual(fs.readdirSync(cwd), [], 'install must not use the caller directory');

@@ -29,9 +29,9 @@ extension. Agent SDK + initializer work belongs in
 (`JuliusBrussee/agent-sdk`). Proprietary Pebble runtime, policy, sessions, TUI,
 distribution, and conformance work belongs in
 `/Users/julb/Desktop/GitHub/caveman-coding-agent`
-(intended `JuliusBrussee/caveman-coding-agent`). Browse driver/MCP/benchmark/plugin work
+(intended `logunovFGP/caveman-coding-agent`). Browse driver/MCP/benchmark/plugin work
 belongs in `/Users/julb/Desktop/GitHub/caveman-browse`
-(`JuliusBrussee/caveman-browse`). Matching `packages/agent/`,
+(`logunovFGP/caveman-browse`). Matching `packages/agent/`,
 `packages/create-caveman-agent/`, and `browse/` directories here are
 historical/consumer copies; edit only for pinned integration, migration/removal,
 or an explicitly requested cross-repo sync.
@@ -310,9 +310,9 @@ Configured in `settings.json` under `statusLine.command`. PowerShell counterpart
 
 **Standalone install** — `bin/install.js` (the unified Node installer) copies hook files into `$CLAUDE_CONFIG_DIR/hooks/` and merges SessionStart + UserPromptSubmit + statusline into `settings.json`. Uses the JSONC-tolerant helpers in `bin/lib/settings.js` so a commented `settings.json` no longer crashes the merge. Defensive `validateHookFields` runs before every write to prevent a single malformed hook from poisoning the entire file (Claude Code Zod silently discards the whole `settings.json` on schema mismatch).
 
-The `install.sh` / `install.ps1` shims at the repo root delegate to `bin/install.js` via `node` (local clone) or `npx -y github:JuliusBrussee/caveman` (curl|bash). No legacy fallback path remains — earlier `install.sh.legacy` / `install.ps1.legacy` files were removed.
+The `install.sh` / `install.ps1` shims at the repo root delegate to `bin/install.js` via `node` (local clone) or `npx -y github:logunovFGP/caveman` (curl|bash). No legacy fallback path remains — earlier `install.sh.legacy` / `install.ps1.legacy` files were removed.
 
-**Uninstall** — `npx -y github:JuliusBrussee/caveman -- --uninstall` (or `node bin/install.js --uninstall` from a clone). Strips caveman hook entries from `settings.json` via substring marker `caveman`, deletes hook files, and removes the Claude plugin / Gemini extension. Native skill copies use `bin/lib/provider-skills.js` and ownership journals; uninstall removes unchanged owned files while preserving foreign or edited content. Use the same vendor home overrides for install and uninstall. Delegated `npx skills add` installs remain managed by the host/upstream skill manager.
+**Uninstall** — `npx -y github:logunovFGP/caveman -- --uninstall` (or `node bin/install.js --uninstall` from a clone). Strips caveman hook entries from `settings.json` via substring marker `caveman`, deletes hook files, and removes the Claude plugin / Gemini extension. Native skill copies use `bin/lib/provider-skills.js` and ownership journals; uninstall removes unchanged owned files while preserving foreign or edited content. Use the same vendor home overrides for install and uninstall. Delegated `npx skills add` installs remain managed by the host/upstream skill manager.
 
 ---
 

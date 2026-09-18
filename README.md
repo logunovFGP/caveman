@@ -12,12 +12,12 @@
 
 ▶️ **[ThePrimeagen reacts: "No way this actually works"](https://www.youtube.com/watch?v=L29q2LRiMRc)**
 
-<a href="https://github.com/JuliusBrussee/caveman/stargazers"><img src="https://img.shields.io/github/stars/JuliusBrussee/caveman?style=flat-square&color=F0A63C&label=stars" alt="GitHub stars"></a>
+<a href="https://github.com/logunovFGP/caveman/stargazers"><img src="https://img.shields.io/github/stars/logunovFGP/caveman?style=flat-square&color=F0A63C&label=stars" alt="GitHub stars"></a>
 <a href="https://www.npmjs.com/package/@caveman-ai/cli"><img src="https://img.shields.io/npm/dm/@caveman-ai/cli?style=flat-square&color=F0A63C&label=cli%20downloads" alt="npm downloads"></a>
 <a href="./INSTALL.md"><img src="https://img.shields.io/badge/works_with-30%2B_agents-orange?style=flat-square" alt="30+ agents"></a>
 <a href="#wrap-any-agent"><img src="https://img.shields.io/badge/wraps-10_agents_natively-blue?style=flat-square" alt="10 native wrap profiles"></a>
 <a href="#-license"><img src="https://img.shields.io/badge/license-MIT_%2B_BSL-green?style=flat-square" alt="License"></a>
-<a href="https://skills.sh/JuliusBrussee/caveman"><img src="https://skills.sh/b/JuliusBrussee/caveman" alt="skills.sh"></a>
+<a href="https://skills.sh/logunovFGP/caveman"><img src="https://skills.sh/b/logunovFGP/caveman" alt="skills.sh"></a>
 
 🏆 **#1 on GitHub Trending · July 2026** &nbsp;·&nbsp; 🥇 **#1 Repository of the Day on [Trendshift](https://trendshift.io/repositories/25391) · April 2026**
 
@@ -28,7 +28,7 @@
 <a href="https://www.producthunt.com/products/caveman?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-caveman-2" target="_blank" rel="noopener noreferrer"><img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1220849&amp;theme=light&amp;t=1786634691828" alt="Caveman - why use many token when few do trick | Product Hunt" width="250" height="54"/></a>
 <a href="https://trendshift.io/repositories/25391?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-25391" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/25391" alt="JuliusBrussee%2Fcaveman | Trendshift" width="250" height="55"/></a>
 
-⚡ **One command, no account, no API key.** `npx skills add JuliusBrussee/caveman -g` **[→ Quick Start](#-quick-start)**
+⚡ **One command, no account, no API key.** `npx skills add logunovFGP/caveman -g` **[→ Quick Start](#-quick-start)**
 
 </div>
 
@@ -95,7 +95,7 @@ Caveman come in two sizes. Start small.
 A rule file that makes your agent answer in caveman. MIT, free forever, works in [30+ agents](./INSTALL.md) (Claude Code, Codex, Gemini, Cursor, Windsurf, Cline, Copilot, more). One command:
 
 ```bash
-npx skills add JuliusBrussee/caveman -g
+npx skills add logunovFGP/caveman -g
 ```
 
 Type `/caveman` if your agent doesn't wake up on its own. That the whole install. One rock.
@@ -119,35 +119,35 @@ They stack. Most people start with the small rock and graduate.
 The full installer wires up Claude Code hooks and the statusline badge, finds every supported agent on your machine, and skips agents you no have. Safe to re-run. Needs Node.js 22.13+.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/JuliusBrussee/caveman/v2.7.0/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/logunovFGP/caveman/v2.7.0-fork.1/install.sh | bash
 ```
 
 Windows, PowerShell 5.1+:
 
 ```powershell
-irm https://raw.githubusercontent.com/JuliusBrussee/caveman/v2.7.0/install.ps1 | iex
+irm https://raw.githubusercontent.com/logunovFGP/caveman/v2.7.0-fork.1/install.ps1 | iex
 ```
 
 Just one agent:
 
 ```bash
 # Claude Code
-claude plugin marketplace add JuliusBrussee/caveman && claude plugin install caveman@caveman
+claude plugin marketplace add logunovFGP/caveman && claude plugin install caveman@caveman
 
 # Gemini CLI
-gemini extensions install https://github.com/JuliusBrussee/caveman
+gemini extensions install https://github.com/logunovFGP/caveman
 
 # Qwen Code CLI, then its Caveman wrapper
 npm i -g @qwen-code/qwen-code
 caveman qwen
 
 # Codex, Cursor, Windsurf, Cline, and other skills-compatible agents
-npx skills add JuliusBrussee/caveman --skill '*' -a codex --yes -g  # replace codex with your agent profile
+npx skills add logunovFGP/caveman --skill '*' -a codex --yes -g  # replace codex with your agent profile
 ```
 
 **Install broke?** Open your agent in this repo and say: *"Read CLAUDE.md and INSTALL.md, install caveman for me."* Agent read repo, agent fix own brain. Snake eat tail.
 
-Changed your mind: `npx -y github:JuliusBrussee/caveman -- --uninstall`
+Changed your mind: `npx -y github:logunovFGP/caveman -- --uninstall`
 
 </details>
 
@@ -263,7 +263,7 @@ Fair headline. We link it anyway. See [The Numbers](#-the-numbers).
 </tr>
 </table>
 
-[![Star History Chart](./docs/assets/star-history.png)](https://star-history.com/#JuliusBrussee/caveman&Date)
+[![Star History Chart](./docs/assets/star-history.png)](https://star-history.com/#logunovFGP/caveman&Date)
 
 ---
 
@@ -440,11 +440,11 @@ One idea everywhere: **agent do more with less.**
 
 | Repo                                                                  | What it shrinks                                          | Status            |
 | --------------------------------------------------------------------- | -------------------------------------------------------- | ----------------- |
-| **[caveman](https://github.com/JuliusBrussee/caveman)** *(you here)*  | What the agent **says** (skill) and **reads** (proxy)    | live              |
-| **[caveman-browse](https://github.com/JuliusBrussee/caveman-browse)** | What the agent **sees in the browser**                   | live              |
+| **[caveman](https://github.com/logunovFGP/caveman)** *(you here)*  | What the agent **says** (skill) and **reads** (proxy)    | live              |
+| **[caveman-browse](https://github.com/logunovFGP/caveman-browse)** | What the agent **sees in the browser**                   | live              |
 | **caveman-agent-sdk**                                                 | What your production agent **loads, calls, and spends**  | own repo · in dev |
 | **[cavegemma](https://github.com/JuliusBrussee/cavegemma)**           | The compression **baked into weights** (Gemma fine-tune) | labs              |
-| **[caveman-code](https://github.com/JuliusBrussee/caveman-code)**     | The **whole agent**, end to end                          | frozen            |
+| **[caveman-code](https://github.com/logunovFGP/caveman-code)**     | The **whole agent**, end to end                          | frozen            |
 | **[cavemem](https://github.com/JuliusBrussee/cavemem)**               | What the agent **remembers**, across sessions            | frozen            |
 | **[cavekit](https://github.com/JuliusBrussee/cavekit)**               | The **build loop**, spec-driven                          | frozen            |
 
@@ -493,7 +493,7 @@ If caveman shows up in your paper, the way it showed up in Adobe's:
   author = {Brussee, Julius},
   title  = {Caveman: why use many token when few do trick},
   year   = {2026},
-  url    = {https://github.com/JuliusBrussee/caveman}
+  url    = {https://github.com/logunovFGP/caveman}
 }
 ```
 
@@ -512,7 +512,7 @@ Caveman save you token, save you money. Star cost zero. Fair trade. ⭐
 <a href="./LICENSE">License</a> ·
 <a href="./CONTRIBUTING.md">Contributing</a> ·
 <a href="./CLAUDE.md">Maintainer guide</a> ·
-<a href="https://github.com/JuliusBrussee/caveman/issues">Issues</a>
+<a href="https://github.com/logunovFGP/caveman/issues">Issues</a>
 <br>
 MIT skill · BSL-1.1 engine. Few token. No lie.
 </sub>

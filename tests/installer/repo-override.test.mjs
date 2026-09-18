@@ -38,6 +38,7 @@ test('--repo retargets the Claude Code marketplace and the Gemini extension URL'
   assert.match(r.stdout, new RegExp(`marketplace add ${FORK}`), 'marketplace still points upstream');
   assert.match(r.stdout, new RegExp(`https://github\\.com/${FORK}`), 'gemini URL still points upstream');
   assert.doesNotMatch(r.stdout, /JuliusBrussee\/caveman/, 'an upstream reference survived --repo');
+  assert.doesNotMatch(r.stdout, /logunovFGP\/caveman/, 'the default slug leaked past --repo');
 });
 
 test('--repo=<slug> is accepted in the GNU form', () => {
@@ -54,8 +55,15 @@ test('--repo rejects anything that is not owner/name', () => {
   }
 });
 
-test('without --repo the default upstream slug is used', () => {
+// This fork is self-sustaining: the default slug is the fork itself, and
+// upstream is reachable only by asking for it explicitly.
+test('the default slug is this fork, and upstream needs an explicit --repo', () => {
   const r = run(['--only', 'claude', '--dry-run']);
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /marketplace add JuliusBrussee\/caveman/);
+  assert.match(r.stdout, /marketplace add logunovFGP\/caveman/);
+  assert.doesNotMatch(r.stdout, /JuliusBrussee/);
+
+  const upstream = run(['--repo', 'JuliusBrussee/caveman', '--only', 'claude', '--dry-run']);
+  assert.equal(upstream.status, 0, upstream.stderr);
+  assert.match(upstream.stdout, /marketplace add JuliusBrussee\/caveman/);
 });

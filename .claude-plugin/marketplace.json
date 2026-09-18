@@ -3,8 +3,8 @@
   "name": "caveman",
   "description": "Ultra-compressed communication mode. Shortens prose while preserving technical terms, code, commands, and exact errors.",
   "owner": {
-    "name": "Julius Brussee",
-    "url": "https://github.com/JuliusBrussee"
+    "name": "logunovFGP",
+    "url": "https://github.com/logunovFGP"
   },
   "plugins": [
     {

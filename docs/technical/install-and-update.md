@@ -21,21 +21,21 @@ Run `caveman setup` to inspect current machine support.
 Run installer directly from GitHub:
 
 ```bash
-npx -y github:JuliusBrussee/caveman
+npx -y github:logunovFGP/caveman
 ```
 
 It detects installed agents and installs only matching integrations. List every
 known target:
 
 ```bash
-npx -y github:JuliusBrussee/caveman -- --list
+npx -y github:logunovFGP/caveman -- --list
 ```
 
 Install one target:
 
 ```bash
-npx -y github:JuliusBrussee/caveman -- --only claude
-npx -y github:JuliusBrussee/caveman -- --only codex
+npx -y github:logunovFGP/caveman -- --only claude
+npx -y github:logunovFGP/caveman -- --only codex
 ```
 
 Claude Code uses its plugin system, while Gemini CLI uses its extension system.
@@ -112,7 +112,7 @@ No Caveman account is required for either local mode.
 Clone repository and run platform installer:
 
 ```bash
-git clone https://github.com/JuliusBrussee/caveman.git
+git clone https://github.com/logunovFGP/caveman.git
 cd caveman
 ./scripts/install-local-cli.sh
 ```
@@ -120,7 +120,7 @@ cd caveman
 Windows PowerShell:
 
 ```powershell
-git clone https://github.com/JuliusBrussee/caveman.git
+git clone https://github.com/logunovFGP/caveman.git
 Set-Location caveman
 pwsh -File scripts/install-local-cli.ps1
 ```
@@ -163,7 +163,7 @@ matters: this step shells out to `caveman disable --all`, so it needs the CLI
 still installed.
 
 ```bash
-npx -y github:JuliusBrussee/caveman -- --uninstall
+npx -y github:logunovFGP/caveman -- --uninstall
 ```
 
 Then remove global CLI through npm:
