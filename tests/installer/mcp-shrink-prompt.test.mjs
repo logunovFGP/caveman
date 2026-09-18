@@ -101,3 +101,51 @@ test('prompts read the controlling terminal, not stdin', () => {
 // question appears, answering y plus an upstream command runs
 // `cline mcp add caveman-shrink --yes --transport stdio -- npx -y caveman-shrink <upstream>`,
 // and declining installs all 23 owned paths and registers nothing.
+
+// The prompt's hard part is the answer, not the question: "Upstream MCP
+// command" is unanswerable unless you already know caveman-shrink wraps a
+// server you run. The installer reads the host's MCP config and offers those.
+// --list-mcp-servers is the same detection without a terminal, which is what
+// makes it testable here.
+function listServers(home) {
+  return spawnSync(process.execPath, [INSTALLER, '--list-mcp-servers'], {
+    env: { ...process.env, CI: '1', HOME: home, USERPROFILE: home, NO_COLOR: '1' },
+    encoding: 'utf8',
+  });
+}
+
+test('only stdio servers are offered as wrap candidates', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'caveman-mcpq-'));
+  try {
+    fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({
+      mcpServers: {
+        tokensave: { type: 'stdio', command: '/usr/bin/true', args: ['serve'] },
+        // http has no command to spawn — offering it would register a proxy
+        // around nothing.
+        remote: { type: 'http', url: 'https://example.com/api/mcp' },
+        // Wrapping ourselves would nest the proxy inside itself.
+        'caveman-shrink': { type: 'stdio', command: 'npx', args: ['-y', 'caveman-shrink', 'x'] },
+        bare: { command: 'bash', args: ['/tmp/run.sh'] },
+      },
+    }));
+
+    const r = listServers(home);
+    assert.equal(r.status, 0, r.stderr);
+    const names = r.stdout.trim().split('\n').map((line) => line.split('\t')[0]).sort();
+    assert.deepEqual(names, ['bare', 'tokensave'], `offered the wrong set: ${r.stdout}`);
+    assert.match(r.stdout, /tokensave\t\/usr\/bin\/true serve/, 'args are not joined onto the command');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('a host with no MCP config offers nothing and says so', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'caveman-mcpq-'));
+  try {
+    const r = listServers(home);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /no stdio MCP servers found/);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});

@@ -47,7 +47,7 @@ const MIN_NODE_MAJOR = 18;
 // the new tag on every release (CI release step) AFTER regenerating
 // src/hooks/checksums.sha256 so the integrity manifest matches the ref.
 // Overridable via CAVEMAN_REF for testing against a branch.
-const PINNED_REF = process.env.CAVEMAN_REF || 'v2.7.0-fork.4';
+const PINNED_REF = process.env.CAVEMAN_REF || 'v2.7.0-fork.5';
 const OPENCLAW_SKILL_VERSION = /^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(PINNED_REF)
   ? PINNED_REF.replace(/^v/, '')
   : undefined;
@@ -106,7 +106,7 @@ function hooksManifestIsOurs(p) {
 function parseArgs(argv) {
   const opts = {
     dryRun: false, force: false,
-    withHooks: 'auto', withInit: false, withMcpShrink: false, mcpShrinkExplicit: false,
+    withHooks: 'auto', withInit: false, withMcpShrink: false, mcpShrinkExplicit: false, listMcpServers: false,
     all: false, minimal: false, listOnly: false, noColor: false,
     only: [], uninstall: false, nonInteractive: false,
     configDir: null, help: false,
@@ -159,6 +159,7 @@ function parseArgs(argv) {
       case '--all': opts.all = true; break;
       case '--minimal': opts.minimal = true; break;
       case '--list': opts.listOnly = true; break;
+      case '--list-mcp-servers': opts.listMcpServers = true; break;
       case '--no-color': opts.noColor = true; break;
       case '--uninstall': case '-u': opts.uninstall = true; break;
       case '--non-interactive': opts.nonInteractive = true; break;
@@ -1056,6 +1057,11 @@ function installClineMcpShrink(ctx) {
   );
   if (spawnOk(r)) {
     note(`    registered, wrapping: ${upstream.join(' ')}`);
+    // The wrapped server is still registered under its own name, so the agent
+    // sees its tools twice — once raw, once through the proxy. Only the proxy
+    // shrinks anything, so leaving both on costs context rather than saving it.
+    note('    the server you wrapped is still registered separately — disable it,');
+    note('    or the agent loads its tools twice and only one copy is shrunk.');
     note('    `cline mcp remove caveman-shrink` to drop it.');
     note(`    Docs: https://github.com/${REPO}/tree/main/src/mcp-servers/caveman-shrink`);
     return { kind: 'ok' };
@@ -1525,6 +1531,11 @@ function installMcpShrink(ctx) {
   );
   if (spawnOk(r)) {
     note(`    registered, wrapping: ${upstream.join(' ')}`);
+    // The wrapped server is still registered under its own name, so the agent
+    // sees its tools twice — once raw, once through the proxy. Only the proxy
+    // shrinks anything, so leaving both on costs context rather than saving it.
+    note('    the server you wrapped is still registered separately — disable it,');
+    note('    or the agent loads its tools twice and only one copy is shrunk.');
     note(`    Edit ~/.claude.json mcpServers["caveman-shrink"] to change the upstream,`);
     note('    or `claude mcp remove caveman-shrink` to drop it.');
     note(`    Docs: https://github.com/${REPO}/tree/main/src/mcp-servers/caveman-shrink`);
@@ -2111,16 +2122,58 @@ const MCP_SHRINK_PROVIDERS = new Set(['claude', 'cline', 'opencode']);
 // only when the user has not already decided with a flag. openTerminal() is
 // what makes `curl … | bash` work: stdin there is the script, so the question
 // goes to /dev/tty.
+// "Upstream MCP command" is unanswerable if you do not already know what
+// caveman-shrink is: it asks for the launch command of a server the user
+// already runs. They have one — it is sitting in their host's MCP config — so
+// read it and offer a numbered list instead of a blank line.
+//
+// stdio only. caveman-shrink spawns a command and speaks over its pipes; an
+// http/sse server has no command to wrap, so listing one would produce a
+// registration that cannot work.
+function detectStdioMcpServers() {
+  const roots = [];
+  const configDir = process.env.CLAUDE_CONFIG_DIR;
+  if (configDir) roots.push(path.join(expandHome(configDir), '.claude.json'));
+  roots.push(path.join(os.homedir(), '.claude.json'));
+
+  const found = [];
+  const seen = new Set();
+  for (const file of roots) {
+    let parsed;
+    try { parsed = JSON.parse(fs.readFileSync(file, 'utf8')); }
+    catch (_) { continue; }
+    const servers = parsed && typeof parsed.mcpServers === 'object' ? parsed.mcpServers : {};
+    for (const [name, spec] of Object.entries(servers || {})) {
+      if (!spec || typeof spec !== 'object') continue;
+      if (name === 'caveman-shrink') continue;           // never wrap ourselves
+      if (typeof spec.command !== 'string' || !spec.command) continue;
+      if (seen.has(name)) continue;
+      const args = Array.isArray(spec.args) ? spec.args.filter((a) => typeof a === 'string') : [];
+      seen.add(name);
+      found.push({ name, argv: [spec.command, ...args] });
+    }
+  }
+  return found;
+}
+
 async function promptForMcpShrink(providerIds, noColor) {
   if (!providerIds.some((id) => MCP_SHRINK_PROVIDERS.has(id))) return false;
   const term = openTerminal();
   if (!term) return false;
 
   const c = makeChalk(noColor);
-  term.output.write('\n' + c.orange('caveman-shrink — compress MCP tool output before it reaches the model') + '\n');
-  term.output.write(c.dim('  It is a proxy: it wraps ONE upstream MCP server, so it needs that\n'));
-  term.output.write(c.dim('  server\'s command. Skip this and add it later with\n'));
-  term.output.write(c.dim('  --with-mcp-shrink="<upstream cmd>".\n'));
+  const candidates = detectStdioMcpServers();
+
+  term.output.write('\n' + c.orange('caveman-shrink — shrink MCP tool output before it reaches the model') + '\n');
+  term.output.write(c.dim('  Tool results are the biggest thing an agent reads. caveman-shrink sits in\n'));
+  term.output.write(c.dim('  front of ONE MCP server you already use, and compresses what that server\n'));
+  term.output.write(c.dim('  sends back. The server keeps working; the agent just reads less of it.\n'));
+  if (candidates.length) {
+    term.output.write(c.dim(`  Found ${candidates.length} MCP server${candidates.length === 1 ? '' : 's'} on this machine — pick one by number.\n`));
+  } else {
+    term.output.write(c.dim('  No MCP servers found in your config, so you would have to paste the\n'));
+    term.output.write(c.dim('  launch command of one yourself. Say no if you are not running any.\n'));
+  }
 
   const rl = readline.createInterface({ input: term.input, output: term.output });
   const ask = (q) => askOnce(rl, q);
@@ -2128,11 +2181,36 @@ async function promptForMcpShrink(providerIds, noColor) {
     const yes = (await ask('Register caveman-shrink? [y/N] ')).trim().toLowerCase();
     if (yes !== 'y' && yes !== 'yes') return false;
 
-    const raw = (await ask('  Upstream MCP command (e.g. npx -y @modelcontextprotocol/server-filesystem /tmp): ')).trim();
+    if (candidates.length) {
+      term.output.write('\n  Which server should it wrap?\n');
+      candidates.forEach((s, i) => {
+        term.output.write(`    [${i + 1}] ${pad(s.name, 22)} ${c.dim(s.argv.join(' '))}\n`);
+      });
+      term.output.write(c.dim('    or paste any launch command; Enter alone skips\n'));
+    }
+
+    const question = candidates.length
+      ? '  Number or command: '
+      : '  Launch command of the MCP server to wrap (e.g. npx -y @modelcontextprotocol/server-filesystem /tmp): ';
+    const raw = (await ask(question)).trim();
     if (!raw) {
-      process.stdout.write(c.dim('  No command given — skipping caveman-shrink.\n'));
+      process.stdout.write(c.dim('  Nothing chosen — skipping caveman-shrink.\n'));
       return false;
     }
+
+    // A bare number picks from the list; anything else is a command. A number
+    // outside the list is a typo, not a one-word command, so say so rather than
+    // registering a proxy around a binary called "7".
+    if (/^\d+$/.test(raw)) {
+      const picked = candidates[Number(raw) - 1];
+      if (!picked) {
+        process.stderr.write(c.red(`  no server numbered ${raw} — skipping caveman-shrink.`) + '\n');
+        return false;
+      }
+      process.stdout.write(c.dim(`  wrapping ${picked.name}: ${picked.argv.join(' ')}\n`));
+      return picked.argv;
+    }
+
     try {
       const parsed = parseCommandArgs(raw);
       if (!parsed.length) throw new Error('empty command');
@@ -2216,6 +2294,9 @@ FLAGS
                         (OPENCLAW_WORKSPACE) — those use their own paths.
   --non-interactive     Never prompt; use defaults. (Auto when stdin is not a TTY.)
   --list                Print provider matrix and exit.
+  --list-mcp-servers    Print the stdio MCP servers caveman-shrink could wrap
+                        (what the install prompt offers) and exit. http/sse
+                        servers are never listed: shrink proxies a command.
   --no-color            Disable ANSI colors.
   -h, --help            Show this help.
 
@@ -2235,6 +2316,13 @@ async function main() {
   const c = makeChalk(opts.noColor);
   if (opts.help) { printHelp(); return 0; }
   if (opts.listOnly) { printList(opts.noColor); return 0; }
+  if (opts.listMcpServers) {
+    // What the shrink prompt would offer, without having to trigger the prompt.
+    const servers = detectStdioMcpServers();
+    if (!servers.length) process.stdout.write('no stdio MCP servers found\n');
+    for (const server of servers) process.stdout.write(`${server.name}\t${server.argv.join(' ')}\n`);
+    return 0;
+  }
 
   installSignalHandlers();
   checkWslWindowsNode();
