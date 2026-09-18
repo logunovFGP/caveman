@@ -149,3 +149,27 @@ test('a host with no MCP config offers nothing and says so', () => {
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
+
+// readline in terminal mode does not let ^C reach the process: node turns it
+// into a 'SIGINT' event on the interface, and an interface with no listener
+// swallows it. The prompt then sits there while the user mashes Ctrl-C, and
+// because the interface also put the TTY in raw mode, an exit that skips
+// rl.close() hands the shell back a terminal that no longer processes line
+// editing. Both halves are why every prompt must be built by createPrompt.
+test('every prompt is built by createPrompt, which wires SIGINT', () => {
+  const source = fs.readFileSync(path.join(REPO_ROOT, 'bin', 'install.js'), 'utf8');
+
+  const factory = source.slice(source.indexOf('function createPrompt('));
+  assert.ok(factory, 'createPrompt is gone');
+  const body = factory.slice(0, factory.indexOf('\n}\n') + 3);
+  assert.match(body, /rl\.on\('SIGINT'/, 'createPrompt no longer wires the readline SIGINT event');
+  assert.match(body, /activePrompt = \{ rl, term \}/, 'the open prompt is no longer tracked for cleanup');
+
+  const bare = [...source.matchAll(/readline\.createInterface\(/g)];
+  assert.equal(bare.length, 1, `readline.createInterface called ${bare.length} times — every prompt must go through createPrompt so ^C is not swallowed`);
+  assert.ok(
+    source.slice(0, bare[0].index).endsWith(body.slice(0, body.indexOf('readline.createInterface('))) ||
+    source.lastIndexOf('function createPrompt(', bare[0].index) !== -1,
+    'the only createInterface call is not the one inside createPrompt',
+  );
+});

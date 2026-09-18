@@ -47,7 +47,7 @@ const MIN_NODE_MAJOR = 18;
 // the new tag on every release (CI release step) AFTER regenerating
 // src/hooks/checksums.sha256 so the integrity manifest matches the ref.
 // Overridable via CAVEMAN_REF for testing against a branch.
-const PINNED_REF = process.env.CAVEMAN_REF || 'v2.7.0-fork.5';
+const PINNED_REF = process.env.CAVEMAN_REF || 'v2.7.0-fork.6';
 const OPENCLAW_SKILL_VERSION = /^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(PINNED_REF)
   ? PINNED_REF.replace(/^v/, '')
   : undefined;
@@ -1610,6 +1610,30 @@ function purgeTempPaths() {
 const SIGNAL_EXIT = { SIGINT: 130, SIGTERM: 143, SIGHUP: 129 };
 let interrupted = false;
 
+// The prompt currently on screen, if any. A readline interface bound to a TTY
+// puts it in raw mode, so an exit that skips rl.close() hands the shell back a
+// terminal that no longer processes line editing or ^C.
+let activePrompt = null;
+
+function closeActivePrompt() {
+  const open = activePrompt;
+  activePrompt = null;
+  if (!open) return;
+  try { open.rl.close(); } catch (_) { /* already gone */ }
+  try { open.term.close(); } catch (_) { /* already gone */ }
+}
+
+// One exit path for both ways a ^C can arrive: the process signal, and the
+// 'SIGINT' event readline raises instead when it owns the TTY.
+function bailOut(sig) {
+  if (interrupted) process.exit(SIGNAL_EXIT[sig] || 130);
+  interrupted = true;
+  closeActivePrompt();
+  process.stderr.write(`\n🪨 interrupted (${sig}) — removing scratch files, nothing left half-written\n`);
+  purgeTempPaths();
+  process.exit(SIGNAL_EXIT[sig] || 130);
+}
+
 // Node defers a signal callback while synchronous install work runs — that is
 // what keeps a ^C from landing mid-rename. The flip side: a promise
 // continuation (main()'s own `.then(process.exit)`) would run BEFORE the
@@ -1620,15 +1644,21 @@ const yieldToSignals = () => new Promise(setImmediate);
 function installSignalHandlers() {
   for (const sig of Object.keys(SIGNAL_EXIT)) {
     // Windows raises SIGINT/SIGTERM only; SIGHUP is accepted but never fires.
-    process.on(sig, () => {
-      // Second signal while cleanup is still running: the user wants out now.
-      if (interrupted) process.exit(SIGNAL_EXIT[sig]);
-      interrupted = true;
-      process.stderr.write(`\n🪨 interrupted (${sig}) — removing scratch files, nothing left half-written\n`);
-      purgeTempPaths();
-      process.exit(SIGNAL_EXIT[sig]);
-    });
+    process.on(sig, () => bailOut(sig));
   }
+}
+
+// readline in terminal mode INTERCEPTS ^C: node turns it into a 'SIGINT' event
+// on the interface and, with no listener, swallows it — the process handler
+// never runs, the prompt just sits there, and the user mashes Ctrl-C into a
+// void until EOF. Every prompt therefore goes through here, which both wires
+// that event and registers the interface so any exit path can restore the
+// terminal it put into raw mode.
+function createPrompt(term) {
+  const rl = readline.createInterface({ input: term.input, output: term.output });
+  activePrompt = { rl, term };
+  rl.on('SIGINT', () => bailOut('SIGINT'));
+  return rl;
 }
 
 // Symlinked config directories (dotfile managers, Syncthing, container mounts)
@@ -2101,10 +2131,9 @@ async function promptForOnly(detected) {
   term.output.write('\nDetected agents:\n');
   detected.forEach((p, i) => term.output.write(`  [${i + 1}] ${p.label}\n`));
   term.output.write('  [a] all   [q] quit\n');
-  const rl = readline.createInterface({ input: term.input, output: term.output });
+  const rl = createPrompt(term);
   const ans = await askOnce(rl, 'Install which? (default: all) ');
-  rl.close();
-  term.close();
+  closeActivePrompt();
   const t = (ans || '').trim().toLowerCase();
   if (t === 'q') process.exit(0);
   if (t === '' || t === 'a' || t === 'all') return null;
@@ -2175,7 +2204,7 @@ async function promptForMcpShrink(providerIds, noColor) {
     term.output.write(c.dim('  launch command of one yourself. Say no if you are not running any.\n'));
   }
 
-  const rl = readline.createInterface({ input: term.input, output: term.output });
+  const rl = createPrompt(term);
   const ask = (q) => askOnce(rl, q);
   try {
     const yes = (await ask('Register caveman-shrink? [y/N] ')).trim().toLowerCase();
@@ -2222,8 +2251,7 @@ async function promptForMcpShrink(providerIds, noColor) {
       return false;
     }
   } finally {
-    rl.close();
-    term.close();
+    closeActivePrompt();
   }
 }
 
