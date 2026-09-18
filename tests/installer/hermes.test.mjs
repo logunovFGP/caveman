@@ -17,6 +17,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { hostlessPath } from './sandbox-env.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '..', '..');
@@ -32,7 +33,9 @@ function runInstaller(args, hermesHome) {
   return spawnSync(process.execPath, [INSTALLER, ...args, '--config-dir', path.join(hermesHome, '.claude-test'), '--non-interactive', '--no-mcp-shrink'], {
     // CLINE_DIR pinned for the same reason HERMES_HOME is: `--uninstall` prunes
     // every native lane, and the cline lane resolves ~/.cline from os.homedir().
-    env: { ...process.env, HERMES_HOME: hermesHome, CLINE_DIR: path.join(hermesHome, 'cline-sandbox'), CLINE_DOCUMENTS_DIR: path.join(hermesHome, 'cline-documents-sandbox'), NO_COLOR: '1' },
+    env: { ...process.env, HERMES_HOME: hermesHome, CLINE_DIR: path.join(hermesHome, 'cline-sandbox'), CLINE_DOCUMENTS_DIR: path.join(hermesHome, 'cline-documents-sandbox'),
+      // See sandbox-env.mjs: a live --uninstall reaches the real hosts on PATH.
+      PATH: hostlessPath(), NO_COLOR: '1' },
     encoding: 'utf8',
   });
 }

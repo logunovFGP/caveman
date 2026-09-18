@@ -22,6 +22,8 @@ function fixture(t) {
   const systemPath = process.platform === 'win32'
     ? path.join(process.env.SystemRoot || 'C:\\Windows', 'System32')
     : ['/usr/bin', '/bin'].join(path.delimiter);
+  // No hostlessPath() here: stubEnv already hands the installer a minimal
+  // PATH (/usr/bin:/bin), so it can never reach a real claude/gemini host.
   const env = stubEnv({
     HOME: home, USERPROFILE: home, PATH: systemPath,
     SystemRoot: process.env.SystemRoot || process.env.WINDIR || '',

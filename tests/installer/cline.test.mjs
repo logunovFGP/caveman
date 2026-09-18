@@ -26,6 +26,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { hostlessPath } from './sandbox-env.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '..', '..');
@@ -71,6 +72,11 @@ function runInstaller(args, home) {
       CLINE_DOCUMENTS_DIR: clineDocsDir(home),
       HOME: home,
       USERPROFILE: home,
+      // `--config-dir` does not scope `claude plugin uninstall` or
+      // `gemini extensions uninstall` — those hit whatever is on PATH, i.e.
+      // the developer's own account. A live --uninstall here removed a real
+      // Claude Code plugin twice before this line existed.
+      PATH: hostlessPath(),
       NO_COLOR: '1',
     },
     encoding: 'utf8',

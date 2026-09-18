@@ -521,6 +521,35 @@ def verify_compress_cli() -> None:
     print("Compress CLI skip/error paths OK")
 
 
+def verify_uninstall_tests_sandbox_hosts() -> None:
+    """A live `--uninstall` in a test must not reach the developer's own hosts.
+
+    `--config-dir` scopes hook files and settings.json. It does NOT scope
+    `claude plugin uninstall` or `gemini extensions uninstall`; those run
+    whatever binary is on PATH, against a real account. Any suite that spawns a
+    non-dry-run `--uninstall` therefore has to hand the installer a PATH with
+    those hosts removed - `hostlessPath()` from sandbox-env.mjs, the local
+    `pathWithout` helpers, or a hand-built minimal PATH.
+    """
+    section("Uninstall host sandbox")
+    offenders = []
+    for path in sorted(Path("tests/installer").glob("*.test.mjs")):
+        text = path.read_text(encoding="utf-8")
+        live = [
+            line for line in text.splitlines()
+            if "'--uninstall'" in line and "--dry-run" not in line
+        ]
+        if not live:
+            continue
+        if not any(token in text for token in ("hostlessPath", "pathWithout", "PATH:")):
+            offenders.append(path.as_posix())
+    ensure(
+        not offenders,
+        "these suites run a live --uninstall without sandboxing PATH: " + ", ".join(offenders),
+    )
+    print("Every live --uninstall test hides the real claude/gemini hosts")
+
+
 def verify_cline_sandbox_pins() -> None:
     """Both Cline roots must be sandboxed together in the installer tests.
 
@@ -818,6 +847,7 @@ def main() -> int:
         verify_compress_fixtures,
         verify_compress_cli,
         verify_cline_sandbox_pins,
+        verify_uninstall_tests_sandbox_hosts,
         verify_hook_install_flow,
     ]
 

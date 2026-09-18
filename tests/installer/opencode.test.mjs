@@ -13,6 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
+import { hostlessPath } from './sandbox-env.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '..', '..');
@@ -53,6 +54,11 @@ function runInstaller(args, env) {
     HERMES_HOME: path.join(env.XDG_CONFIG_HOME, 'hermes-sandbox'),
     ...env,
   };
+  // AFTER the spread on purpose: callers pass their own PATH (the stub
+  // `opencode` bin dir prepended to the real one), so setting it above just got
+  // overwritten — and the real `claude` stayed reachable. Filter the merged
+  // value instead, keeping their stubs and dropping only the hosts.
+  sandboxed.PATH = hostlessPath(sandboxed.PATH);
   return spawnSync(process.execPath, [INSTALLER, ...args, '--config-dir', configDir, '--non-interactive', '--no-mcp-shrink'], {
     env: sandboxed, encoding: 'utf8',
   });
