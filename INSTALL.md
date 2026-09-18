@@ -50,7 +50,7 @@ If you want to install for one agent (or want to know exactly what command runs 
 | **Codex CLI** | `npx skills add JuliusBrussee/caveman -a codex -g` | Per-session: `/caveman` |
 | **Cursor** | `npx skills add JuliusBrussee/caveman -a cursor -g` | Per-session by default; `--with-init` for an always-on rule file |
 | **Windsurf** | `npx skills add JuliusBrussee/caveman -a windsurf -g` | Per-session by default; `--with-init` for an always-on rule file |
-| **Cline** | `npx -y github:JuliusBrussee/caveman -- --only cline` *(or `node bin/install.js --only cline` from a clone)* | Yes (global rule + all skills + cavecrew subagents) |
+| **Cline** | `npx -y github:JuliusBrussee/caveman -- --only cline` *(or `node bin/install.js --only cline` from a clone)* | Yes — skills land in `~/.cline/skills/`, the always-on rule in `~/Documents/Cline/Rules/`, cavecrew subagents in `~/Documents/Cline/Agents/` |
 | **GitHub Copilot** | `npx -y github:JuliusBrussee/caveman -- --only copilot --with-init` | Repo-wide instructions via `--with-init` |
 | **Continue** | `npx -y github:JuliusBrussee/caveman -- --only continue` | No — invoke the Caveman skill |
 | **Kilo Code** | `npx skills add JuliusBrussee/caveman -a kilo -g` | No |
@@ -131,6 +131,7 @@ Useful flags:
 | `--with-mcp-shrink="<upstream cmd>"` | Register `caveman-shrink` MCP proxy wrapping the given upstream MCP server, in Claude Code and Cline. **Off by default.** A value is required — caveman-shrink is a proxy and exits immediately without one. Example: `--with-mcp-shrink="npx @modelcontextprotocol/server-filesystem /tmp"`. Within the value, single or double quotes group paths containing spaces; backslashes stay literal. A JSON array of strings also works when arguments contain quotes. No shell expansion occurs. |
 | `--no-mcp-shrink` | Skip MCP-shrink registration. (Default.) |
 | `--with-hooks` / `--no-hooks` | Force-on or force-off the Claude Code hook installer. (Default: on.) |
+| `--repo <owner>/<name>` | Pull the remote lanes from a different GitHub repo — Claude Code marketplace, Gemini extension URL, `npx skills add`, and the raw hook downloads. Use it to install from a fork: `--repo myuser/caveman`. Native lanes (cline, opencode, openclaw, hermes) always copy from the local clone, so they follow whatever checkout you run. Validated as `owner/name`; anything else exits 2. |
 | `--config-dir <path>` | Claude Code config dir for hook files + `settings.json`. **Does NOT scope** `claude plugin install`, `gemini extensions install`, opencode (`XDG_CONFIG_HOME`), or openclaw (`OPENCLAW_WORKSPACE`) — those use their own paths. Default: `$CLAUDE_CONFIG_DIR` or `~/.claude`. `~` is expanded. |
 | `--non-interactive` | Never prompt; use defaults. (Auto when stdin is not a TTY.) |
 | `--no-color` | Disable ANSI colors. |

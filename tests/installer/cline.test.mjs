@@ -1,8 +1,14 @@
 // Cline native install — skills, always-on rule, and cavecrew subagents.
 //
-// Cline reads three separate trees under $CLINE_DIR (default ~/.cline):
-// skills/<name>/SKILL.md, rules/*.md (always-on), and agents/*.yaml (subagent
-// presets). This replaced a generic `npx skills add -a cline` lane that could
+// Cline reads the three trees from two roots, and only skills honour $CLINE_DIR:
+// $CLINE_DIR/skills/<name>/SKILL.md, ~/Documents/Cline/Rules/*.md (always-on),
+// and ~/Documents/Cline/Agents/*.yaml (subagent presets). Pinned from cline
+// source — disk.ts clineSkillsDir/ensureRulesDirectoryExists and
+// AgentConfigLoader.getAgentsConfigPath — because an earlier version of this
+// lane put the rule and the agents under $CLINE_DIR, where nothing reads them.
+// The HOME override below is load-bearing for that reason: without it the suite
+// writes into the developer's own ~/Documents/Cline.
+// This replaced a generic `npx skills add -a cline` lane that could
 // not work: its detect rule (`vscode-ext:cline`) never matched Cline's real
 // extension dir (saoudrizwan.claude-dev-*) while it DID match Roo Code's
 // (rooveterinaryinc.roo-cline), and it passed no -g so a curl|bash run dropped
@@ -19,10 +25,15 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '..', '..');
 const INSTALLER = path.join(REPO_ROOT, 'bin', 'install.js');
+// Same digest function the installer journals with — the migration test has to
+// forge a journal the real uninstall path accepts, and a hand-written hash is
+// treated (correctly) as user-modified content and left alone.
+const OWNED = createRequire(import.meta.url)(path.join(REPO_ROOT, 'bin', 'lib', 'owned-install.js'));
 
 // Derived, not hardcoded: the lane auto-discovers skills/ so that a skill added
 // later ships without anyone remembering to edit a list. The test mirrors that
@@ -35,6 +46,7 @@ const SKILLS = fs.readdirSync(path.join(REPO_ROOT, 'skills'), { withFileTypes: t
   .sort();
 const AGENTS = ['cavecrew-investigator.yaml', 'cavecrew-builder.yaml', 'cavecrew-reviewer.yaml'];
 const JOURNAL = '.caveman-cline-ownership.json';
+const DOCS_JOURNAL = '.caveman-cline-documents-ownership.json';
 
 function freshHome() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'caveman-cline-'));
@@ -44,9 +56,21 @@ function clineDir(home) {
   return path.join(home, '.cline');
 }
 
+function clineDocsDir(home) {
+  return path.join(home, 'Documents', 'Cline');
+}
+
 function runInstaller(args, home) {
   return spawnSync(process.execPath, [INSTALLER, ...args, '--config-dir', path.join(home, '.claude-test'), '--non-interactive', '--no-mcp-shrink'], {
-    env: { ...process.env, CLINE_DIR: clineDir(home), NO_COLOR: '1' },
+    env: {
+      ...process.env,
+      CLINE_DIR: clineDir(home),
+      // os.homedir() reads HOME on POSIX and USERPROFILE on Windows; the
+      // documents root is derived from it and ignores CLINE_DIR entirely.
+      HOME: home,
+      USERPROFILE: home,
+      NO_COLOR: '1',
+    },
     encoding: 'utf8',
   });
 }
@@ -69,20 +93,26 @@ test('cline fresh install lands skills, the always-on rule, and cavecrew agents'
     // /caveman-stats here, so the lane must NOT ship it.
     assert.equal(fs.existsSync(path.join(root, 'skills', 'caveman-stats')), false, 'caveman-stats must not ship to Cline');
 
-    const rule = fs.readFileSync(path.join(root, 'rules', 'caveman.md'), 'utf8');
+    const docs = clineDocsDir(home);
+    const rule = fs.readFileSync(path.join(docs, 'Rules', 'caveman.md'), 'utf8');
     assert.match(rule, /^Respond terse like smart caveman/, 'rule body is not the caveman ruleset');
 
     for (const name of AGENTS) {
-      const body = fs.readFileSync(path.join(root, 'agents', name), 'utf8');
+      const body = fs.readFileSync(path.join(docs, 'Agents', name), 'utf8');
       // Cline's agent loader requires frontmatter with name + description.
       assert.match(body, /^---\r?\n/, `${name} lost its frontmatter fence`);
       assert.match(body, /^name:\s*cavecrew-/m, `${name} missing name:`);
       assert.match(body, /^description:/m, `${name} missing description:`);
     }
-    // .md in agents/ is never read by Cline — the copy must change the extension.
-    assert.equal(fs.existsSync(path.join(root, 'agents', 'cavecrew-builder.md')), false);
+    // .md in Agents/ is never read by Cline — the copy must change the extension.
+    assert.equal(fs.existsSync(path.join(docs, 'Agents', 'cavecrew-builder.md')), false);
+
+    // $CLINE_DIR holds skills only. Anything here is a path Cline never reads.
+    assert.equal(fs.existsSync(path.join(root, 'rules')), false, 'rule written where Cline does not read it');
+    assert.equal(fs.existsSync(path.join(root, 'agents')), false, 'agents written where Cline does not read them');
 
     assert.ok(fs.existsSync(path.join(root, JOURNAL)), 'ownership journal not written');
+    assert.ok(fs.existsSync(path.join(docs, DOCS_JOURNAL)), 'documents ownership journal not written');
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
@@ -128,11 +158,64 @@ test('cline uninstall removes skills, rule, agents and the journal', () => {
     for (const name of SKILLS) {
       assert.equal(fs.existsSync(path.join(root, 'skills', name)), false, `${name} survived uninstall`);
     }
-    assert.equal(fs.existsSync(path.join(root, 'rules', 'caveman.md')), false, 'rule survived uninstall');
+    const docs = clineDocsDir(home);
+    assert.equal(fs.existsSync(path.join(docs, 'Rules', 'caveman.md')), false, 'rule survived uninstall');
     for (const name of AGENTS) {
-      assert.equal(fs.existsSync(path.join(root, 'agents', name)), false, `${name} survived uninstall`);
+      assert.equal(fs.existsSync(path.join(docs, 'Agents', name)), false, `${name} survived uninstall`);
     }
     assert.equal(fs.existsSync(path.join(root, JOURNAL)), false, 'journal survived uninstall');
+    assert.equal(fs.existsSync(path.join(docs, DOCS_JOURNAL)), false, 'documents journal survived uninstall');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+// ── 2b. One-time migration off the old (unread) $CLINE_DIR layout ──────────
+// Installs produced before the path fix journaled rules/ and agents/ under
+// $CLINE_DIR. Re-running must move them, not leave two copies with only one
+// of them live.
+test('cline install migrates a legacy $CLINE_DIR rule and agents to the documents root', () => {
+  const home = freshHome();
+  try {
+    const root = clineDir(home);
+    // Simulate the old layout by installing, then relocating what the new
+    // installer writes into the documents root back under $CLINE_DIR, with a
+    // journal that claims them — exactly the on-disk state the old lane left.
+    assert.equal(runInstaller(['--only', 'cline'], home).status, 0);
+    const docs = clineDocsDir(home);
+    fs.mkdirSync(path.join(root, 'rules'), { recursive: true });
+    fs.mkdirSync(path.join(root, 'agents'), { recursive: true });
+    fs.renameSync(path.join(docs, 'Rules', 'caveman.md'), path.join(root, 'rules', 'caveman.md'));
+    for (const name of AGENTS) {
+      fs.renameSync(path.join(docs, 'Agents', name), path.join(root, 'agents', name));
+    }
+    fs.rmSync(docs, { recursive: true, force: true });
+    const journalPath = path.join(root, JOURNAL);
+    const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8'));
+    journal.entries['rules/caveman.md'] = {
+      installedDigest: OWNED.digestPath(path.join(root, 'rules', 'caveman.md')),
+    };
+    for (const name of AGENTS) {
+      journal.entries[`agents/${name}`] = {
+        installedDigest: OWNED.digestPath(path.join(root, 'agents', name)),
+      };
+    }
+    fs.writeFileSync(journalPath, JSON.stringify(journal, null, 2) + '\n');
+
+    const r = runInstaller(['--only', 'cline', '--force'], home);
+    assert.equal(r.status, 0, r.stderr);
+
+    assert.equal(fs.existsSync(path.join(root, 'rules', 'caveman.md')), false, 'legacy rule was left behind');
+    for (const name of AGENTS) {
+      assert.equal(fs.existsSync(path.join(root, 'agents', name)), false, `legacy ${name} was left behind`);
+    }
+    assert.ok(fs.existsSync(path.join(docs, 'Rules', 'caveman.md')), 'rule missing from the documents root');
+    for (const name of AGENTS) {
+      assert.ok(fs.existsSync(path.join(docs, 'Agents', name)), `${name} missing from the documents root`);
+    }
+    for (const name of SKILLS) {
+      assert.ok(fs.existsSync(path.join(root, 'skills', name, 'SKILL.md')), `${name} lost during migration`);
+    }
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
@@ -145,8 +228,7 @@ test('cline dry-run install writes nothing', () => {
     const r = runInstaller(['--only', 'cline', '--dry-run'], home);
     assert.equal(r.status, 0, r.stderr);
     assert.equal(fs.existsSync(path.join(clineDir(home), 'skills')), false);
-    assert.equal(fs.existsSync(path.join(clineDir(home), 'rules')), false);
-    assert.equal(fs.existsSync(path.join(clineDir(home), 'agents')), false);
+    assert.equal(fs.existsSync(clineDocsDir(home)), false, 'dry run created the documents root');
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
@@ -163,7 +245,7 @@ test('cline dry-run uninstall leaves the install in place', () => {
     for (const name of SKILLS) {
       assert.ok(fs.existsSync(path.join(root, 'skills', name)), `${name} was deleted by a dry-run uninstall`);
     }
-    assert.ok(fs.existsSync(path.join(root, 'rules', 'caveman.md')));
+    assert.ok(fs.existsSync(path.join(clineDocsDir(home), 'Rules', 'caveman.md')));
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
@@ -183,7 +265,7 @@ test('cline refuses unowned same-named content without writing a partial install
     assert.match(result.stderr, /ownership conflict/);
     assert.equal(fs.readFileSync(path.join(userSkill, 'SKILL.md'), 'utf8'), '# user-owned\n');
     assert.equal(fs.existsSync(path.join(root, 'skills', 'caveman-review')), false, 'conflict must fail before partial copy');
-    assert.equal(fs.existsSync(path.join(root, 'rules', 'caveman.md')), false, 'conflict must fail before writing the rule');
+    assert.equal(fs.existsSync(path.join(clineDocsDir(home), 'Rules', 'caveman.md')), false, 'conflict must fail before writing the rule');
     assert.equal(fs.existsSync(path.join(root, JOURNAL)), false);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
@@ -193,7 +275,7 @@ test('cline refuses unowned same-named content without writing a partial install
 test('cline uninstall never deletes unjournaled same-named user content', () => {
   const home = freshHome();
   try {
-    const userRule = path.join(clineDir(home), 'rules', 'caveman.md');
+    const userRule = path.join(clineDocsDir(home), 'Rules', 'caveman.md');
     fs.mkdirSync(path.dirname(userRule), { recursive: true });
     fs.writeFileSync(userRule, '# user-owned\n');
 

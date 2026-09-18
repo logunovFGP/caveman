@@ -31,7 +31,11 @@ const PORTABLE = require('./lib/portable-process');
 const PLATFORM_PATHS = require('./lib/platform-paths');
 const { parseCommandArgs } = require('./lib/command-args');
 
-const REPO = 'JuliusBrussee/caveman';
+// Mutable so --repo can retarget every remote lane (marketplace add, gemini
+// extension URL, npx skills add, raw hook downloads) at a fork. The four
+// derived URLs below are reassigned together in setRepo(); nothing may capture
+// them at module load.
+let REPO = 'JuliusBrussee/caveman';
 // Mirrors the `engines.node` floor in package.json. Hardcoded rather than read
 // from disk because this file also runs detached from a checkout (the curl
 // fallback path); `tests/installer/node-floor.test.mjs` fails the build if the
@@ -47,9 +51,24 @@ const PINNED_REF = process.env.CAVEMAN_REF || 'v2.7.0';
 const OPENCLAW_SKILL_VERSION = /^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(PINNED_REF)
   ? PINNED_REF.replace(/^v/, '')
   : undefined;
-const RAW_BASE = `https://raw.githubusercontent.com/${REPO}/${PINNED_REF}`;
-const HOOKS_REMOTE = `${RAW_BASE}/src/hooks`;
-const INIT_SCRIPT_URL = `${RAW_BASE}/src/tools/caveman-init.js`;
+let RAW_BASE = `https://raw.githubusercontent.com/${REPO}/${PINNED_REF}`;
+let HOOKS_REMOTE = `${RAW_BASE}/src/hooks`;
+let INIT_SCRIPT_URL = `${RAW_BASE}/src/tools/caveman-init.js`;
+
+// GitHub owner/name only. The value is interpolated into URLs and passed as an
+// argv token to `claude`, `gemini` and `npx skills`, so it is validated at the
+// boundary rather than trusted.
+const REPO_SLUG_RE = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
+
+function setRepo(slug) {
+  if (!REPO_SLUG_RE.test(slug)) {
+    die(`error: --repo expects <owner>/<name>, got: ${slug}`);
+  }
+  REPO = slug;
+  RAW_BASE = `https://raw.githubusercontent.com/${REPO}/${PINNED_REF}`;
+  HOOKS_REMOTE = `${RAW_BASE}/src/hooks`;
+  INIT_SCRIPT_URL = `${RAW_BASE}/src/tools/caveman-init.js`;
+}
 const MCP_SHRINK_PKG = 'caveman-shrink';
 // Hook files to copy. Statusline ships in both .sh (macOS/Linux) and .ps1
 // (Windows) flavors — copy both regardless of host OS so a roaming
@@ -98,6 +117,10 @@ function parseArgs(argv) {
     // GNU-style =value form is recognized). Bare --with-mcp-shrink falls
     // through to the switch and is rejected — caveman-shrink is a proxy
     // and a stub registration just lands the user in a broken-MCP loop (#474).
+    if (a.startsWith('--repo=')) {
+      setRepo(a.slice('--repo='.length));
+      continue;
+    }
     if (a.startsWith('--with-mcp-shrink=')) {
       const raw = a.slice('--with-mcp-shrink='.length);
       opts.withMcpShrink = upstreamArgs(raw);
@@ -124,6 +147,13 @@ function parseArgs(argv) {
         break;
       }
       case '--no-mcp-shrink': opts.withMcpShrink = false; break;
+      case '--repo': {
+        const v = argv[i + 1];
+        if (!v || v.startsWith('--')) die('error: --repo requires <owner>/<name>, e.g. --repo myuser/caveman');
+        i++;
+        setRepo(v);
+        break;
+      }
       case '--all': opts.all = true; break;
       case '--minimal': opts.minimal = true; break;
       case '--list': opts.listOnly = true; break;
@@ -796,10 +826,18 @@ function installHermes(ctx) {
 }
 
 // ── cline native install ───────────────────────────────────────────────────
-// Cline reads three separate directories under ~/.cline (or $CLINE_DIR):
-//   skills/<name>/SKILL.md  — on-demand skills, also exposed as /<name>
-//   rules/*.md              — always-on, injected into the system prompt
-//   agents/*.yaml           — subagent presets, exposed as subagent_<name> tools
+// Cline reads the three trees from TWO different roots, which is the whole
+// reason this lane is fiddly:
+//   $CLINE_DIR/skills/<name>/SKILL.md   — on-demand skills, also exposed as /<name>
+//   ~/Documents/Cline/Rules/*.md        — always-on, injected into the system prompt
+//   ~/Documents/Cline/Agents/*.yaml     — subagent presets, exposed as subagent_<name>
+// Only skills honour $CLINE_DIR. Verified against cline source, not docs:
+// disk.ts GlobalFileNames.clineSkillsDir is ".cline/skills", while
+// ensureRulesDirectoryExists() resolves <documents>/Cline/Rules and
+// AgentConfigLoader.ts pins path.join(os.homedir(), "Documents", "Cline",
+// "Agents"). Neither built bundle contains the string ".cline/rules" or
+// ".cline/agents" at all — an earlier version of this lane wrote both there,
+// so the rule and all three subagents were silently inert.
 // So unlike the `npx skills add` lane this replaced, the always-on ruleset does
 // not need a per-repo .clinerules file: the global rule covers every workspace.
 //
@@ -836,6 +874,37 @@ function clineConfigDir() {
   return override || path.join(os.homedir(), '.cline');
 }
 
+// Cline's global rule and subagent roots. $CLINE_DIR does NOT apply here:
+// AgentConfigLoader.ts joins os.homedir() directly, and the rules directory
+// falls back to the same homedir path when the VS Code documents lookup fails.
+function clineDocumentsDir() {
+  return path.join(os.homedir(), 'Documents', 'Cline');
+}
+
+// One-time migration off the old wrong root. Entries under rules/ or agents/ in
+// the $CLINE_DIR journal were written by a version of this lane that Cline never
+// read. uninstallOwned is the whole-root API, so the skills come out with them
+// and are reinstalled immediately below — that also restores any user file the
+// old install had backed up, which a targeted unlink would strand.
+function pruneLegacyClineRoot(root, { note, warn, dryRun }) {
+  const { journalPath } = OWNED.journalPaths(root, 'cline');
+  let journal;
+  try { journal = JSON.parse(fs.readFileSync(journalPath, 'utf8')); }
+  catch (_) { return false; }
+  const stale = Object.keys(journal?.entries || {})
+    .filter((rel) => rel.startsWith('rules/') || rel.startsWith('agents/'));
+  if (stale.length === 0) return false;
+  note(`  migrating ${stale.length} path(s) off ${root} — Cline never read them`);
+  if (dryRun) return true;
+  try {
+    OWNED.uninstallOwned({ root, integration: 'cline', note, warn });
+    return true;
+  } catch (error) {
+    warn(`  could not prune the old Cline layout: ${error.message}`);
+    return false;
+  }
+}
+
 function installCline(ctx) {
   const { say, note, warn, opts, repoRoot, results } = ctx;
   results.detected++;
@@ -853,10 +922,13 @@ function installCline(ctx) {
 
   const skillDirs = clineSkillDirs(repoRoot);
 
+  const docsRoot = clineDocumentsDir();
+
   if (opts.dryRun) {
+    pruneLegacyClineRoot(root, { note, warn, dryRun: true });
     note(`  would copy ${skillDirs.length} skill dirs into ${path.join(root, 'skills')}/`);
-    note(`  would write ${path.join(root, 'rules', 'caveman.md')}`);
-    note(`  would write ${CLINE_AGENT_FILES.length} cavecrew agents into ${path.join(root, 'agents')}/`);
+    note(`  would write ${path.join(docsRoot, 'Rules', 'caveman.md')}`);
+    note(`  would write ${CLINE_AGENT_FILES.length} cavecrew agents into ${path.join(docsRoot, 'Agents')}/`);
     if (opts.withMcpShrink) note(`  would run: cline mcp add caveman-shrink --yes -- npx -y ${MCP_SHRINK_PKG} ${opts.withMcpShrink.join(' ')}`);
     results.installed.push('cline');
     process.stdout.write('\n');
@@ -864,7 +936,10 @@ function installCline(ctx) {
   }
 
   try {
+    pruneLegacyClineRoot(root, { note, warn, dryRun: false });
+
     const operations = [];
+    const docsOperations = [];
 
     for (const skillDir of skillDirs) {
       const srcDir = path.join(repoRoot, 'skills', skillDir);
@@ -882,8 +957,8 @@ function installCline(ctx) {
     const rulePath = path.join(repoRoot, 'src', 'rules', 'caveman-activate.md');
     if (fs.existsSync(rulePath)) {
       const ruleBody = fs.readFileSync(rulePath, 'utf8').trimEnd() + '\n';
-      operations.push({
-        relativePath: 'rules/caveman.md',
+      docsOperations.push({
+        relativePath: 'Rules/caveman.md',
         write: (stage) => fs.writeFileSync(stage, ruleBody, { mode: 0o600 }),
       });
     } else {
@@ -902,8 +977,8 @@ function installCline(ctx) {
         continue;
       }
       const body = fs.readFileSync(srcFile);
-      operations.push({
-        relativePath: `agents/${agentFile.replace(/\.md$/, '.yaml')}`,
+      docsOperations.push({
+        relativePath: `Agents/${agentFile.replace(/\.md$/, '.yaml')}`,
         write: (stage) => fs.writeFileSync(stage, body, { mode: 0o600 }),
       });
     }
@@ -915,6 +990,16 @@ function installCline(ctx) {
       force: opts.force,
       note,
     });
+
+    if (docsOperations.length) {
+      OWNED.installOwned({
+        root: docsRoot,
+        integration: 'cline-documents',
+        operations: docsOperations,
+        force: opts.force,
+        note,
+      });
+    }
 
     results.installed.push('cline');
   } catch (err) {
@@ -1855,9 +1940,24 @@ function uninstall(ctx) {
       note,
       warn,
     });
-    if (clineOwnership.hadJournal) ok('  pruned owned caveman skills, rule and agents from Cline');
+    if (clineOwnership.hadJournal) ok('  pruned owned caveman skills from Cline');
   } catch (error) {
     warn(`  Cline ownership journal invalid; left integration untouched: ${error.message}`);
+  }
+
+  // Second Cline root: the always-on rule and the subagent presets live under
+  // ~/Documents/Cline, which $CLINE_DIR does not move. Separate journal.
+  try {
+    const clineDocsOwnership = OWNED.uninstallOwned({
+      root: clineDocumentsDir(),
+      integration: 'cline-documents',
+      dryRun: opts.dryRun,
+      note,
+      warn,
+    });
+    if (clineDocsOwnership.hadJournal) ok('  pruned owned caveman rule and agents from Cline');
+  } catch (error) {
+    warn(`  Cline documents ownership journal invalid; left it untouched: ${error.message}`);
   }
 
   // Per-session state. Keep lifetime savings history unless user removes it.
@@ -1983,6 +2083,10 @@ FLAGS
                         Example: --with-mcp-shrink="npx @modelcontextprotocol/server-filesystem /tmp"
   --no-mcp-shrink       Skip MCP shrink. (Default.)
   --uninstall, -u       Remove caveman from this machine.
+  --repo <owner>/<name> Pull the remote lanes (Claude Code marketplace, Gemini
+                        extension, npx skills, raw hook downloads) from this
+                        GitHub repo instead of JuliusBrussee/caveman. Native
+                        lanes always copy from the local clone.
   --config-dir <path>   Claude Code config dir for hook files + settings.json.
                         Default: \$CLAUDE_CONFIG_DIR or ~/.claude. Does NOT
                         scope \`claude plugin install\`, \`gemini extensions
