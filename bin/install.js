@@ -244,7 +244,7 @@ const PROVIDERS = [
   // uninstall and false-positives heavily.
   { id: 'cursor',     label: 'Cursor',              mech: 'npx skills add (cursor)',       detect: 'command:cursor||macapp:Cursor', profile: 'cursor' },
   { id: 'windsurf',   label: 'Windsurf',            mech: 'npx skills add (windsurf)',     detect: 'command:windsurf||macapp:Windsurf', profile: 'windsurf' },
-  { id: 'cline',      label: 'Cline',               mech: 'npx skills add (cline)',        detect: 'vscode-ext:cline',        profile: 'cline' },
+  { id: 'cline',      label: 'Cline',               mech: 'native cline skills + rule + agents', detect: 'command:cline||vscode-ext:saoudrizwan.claude-dev' },
   { id: 'continue',   label: 'Continue',            mech: 'native skills copy',     detect: 'vscode-ext:continue.continue||vscode-ext:continue', profile: 'continue' },
   { id: 'kilo',       label: 'Kilo Code',           mech: 'npx skills add (kilo)',         detect: 'vscode-ext:kilocode', profile: 'kilo' },
   { id: 'roo',        label: 'Roo Code',            mech: 'npx skills add (roo)',          detect: 'vscode-ext:roo||vscode-ext:rooveterinaryinc.roo-cline||cursor-ext:roo', profile: 'roo' },
@@ -793,6 +793,178 @@ function installHermes(ctx) {
   }
 
   process.stdout.write('\n');
+}
+
+// ── cline native install ───────────────────────────────────────────────────
+// Cline reads three separate directories under ~/.cline (or $CLINE_DIR):
+//   skills/<name>/SKILL.md  — on-demand skills, also exposed as /<name>
+//   rules/*.md              — always-on, injected into the system prompt
+//   agents/*.yaml           — subagent presets, exposed as subagent_<name> tools
+// So unlike the `npx skills add` lane this replaced, the always-on ruleset does
+// not need a per-repo .clinerules file: the global rule covers every workspace.
+//
+// Skills are auto-discovered from skills/, the same wholesale rule the Claude
+// Code plugin uses — a hand-maintained list (what the Hermes and opencode lanes
+// carry) silently stops shipping every skill added after it was written. Any
+// skills/<name>/SKILL.md ships; skills/generated/ has no SKILL.md and so
+// self-excludes.
+//
+// caveman-stats is the one deliberate exclusion. Its SKILL.md documents itself
+// as hook-delivered (the Claude Code UserPromptSubmit hook returns the numbers);
+// Cline's file hooks run detached with stdout ignored, so /caveman-stats would
+// load a skill that can never produce output.
+const CLINE_SKILL_EXCLUDE = new Set(['caveman-stats']);
+const CLINE_AGENT_FILES = ['cavecrew-investigator.md', 'cavecrew-builder.md', 'cavecrew-reviewer.md'];
+
+function clineSkillDirs(repoRoot) {
+  const skillsRoot = path.join(repoRoot, 'skills');
+  let entries;
+  try { entries = fs.readdirSync(skillsRoot, { withFileTypes: true }); }
+  catch (_) { return []; }
+  return entries
+    .filter((e) => e.isDirectory() && !CLINE_SKILL_EXCLUDE.has(e.name))
+    .filter((e) => fs.existsSync(path.join(skillsRoot, e.name, 'SKILL.md')))
+    .map((e) => e.name)
+    .sort();
+}
+
+function clineConfigDir() {
+  // Mirrors cline's own resolveClineDir(): $CLINE_DIR wins, else ~/.cline.
+  // Trimmed because an empty/whitespace CLINE_DIR must fall back, not resolve
+  // the config root to the process cwd.
+  const override = (process.env.CLINE_DIR || '').trim();
+  return override || path.join(os.homedir(), '.cline');
+}
+
+function installCline(ctx) {
+  const { say, note, warn, opts, repoRoot, results } = ctx;
+  results.detected++;
+  say('→ Cline detected');
+
+  if (!repoRoot) {
+    warn('  Cline native install requires a local clone of the caveman repo.');
+    note('  Re-run from a clone: git clone https://github.com/' + REPO + ' && cd caveman && node bin/install.js --only cline');
+    results.failed.push(['cline', 'native install requires local repo clone']);
+    process.stdout.write('\n');
+    return;
+  }
+
+  const root = clineConfigDir();
+
+  const skillDirs = clineSkillDirs(repoRoot);
+
+  if (opts.dryRun) {
+    note(`  would copy ${skillDirs.length} skill dirs into ${path.join(root, 'skills')}/`);
+    note(`  would write ${path.join(root, 'rules', 'caveman.md')}`);
+    note(`  would write ${CLINE_AGENT_FILES.length} cavecrew agents into ${path.join(root, 'agents')}/`);
+    if (opts.withMcpShrink) note(`  would run: cline mcp add caveman-shrink --yes -- npx -y ${MCP_SHRINK_PKG} ${opts.withMcpShrink.join(' ')}`);
+    results.installed.push('cline');
+    process.stdout.write('\n');
+    return;
+  }
+
+  try {
+    const operations = [];
+
+    for (const skillDir of skillDirs) {
+      const srcDir = path.join(repoRoot, 'skills', skillDir);
+      if (!fs.existsSync(srcDir)) {
+        warn(`  skill dir not found: ${srcDir}`);
+        continue;
+      }
+      operations.push({
+        relativePath: `skills/${skillDir}`,
+        write: (stage) => OWNED.copyPath(srcDir, stage),
+      });
+    }
+
+    // Always-on ruleset. Same single source as the opencode AGENTS.md block.
+    const rulePath = path.join(repoRoot, 'src', 'rules', 'caveman-activate.md');
+    if (fs.existsSync(rulePath)) {
+      const ruleBody = fs.readFileSync(rulePath, 'utf8').trimEnd() + '\n';
+      operations.push({
+        relativePath: 'rules/caveman.md',
+        write: (stage) => fs.writeFileSync(stage, ruleBody, { mode: 0o600 }),
+      });
+    } else {
+      warn(`  rule source not found: ${rulePath}`);
+    }
+
+    // Cavecrew subagents. Cline only scans .yml/.yaml in agents/, so the copy
+    // changes the extension — the bytes are unchanged. Its parser splits the
+    // frontmatter itself and ignores keys outside its schema, so the Claude-only
+    // `model: haiku` needs no stripping (contrast bin/lib/opencode-agent.js,
+    // where a provider-less model: is a hard runtime failure).
+    for (const agentFile of CLINE_AGENT_FILES) {
+      const srcFile = path.join(repoRoot, 'agents', agentFile);
+      if (!fs.existsSync(srcFile)) {
+        warn(`  agent file not found: ${srcFile}`);
+        continue;
+      }
+      const body = fs.readFileSync(srcFile);
+      operations.push({
+        relativePath: `agents/${agentFile.replace(/\.md$/, '.yaml')}`,
+        write: (stage) => fs.writeFileSync(stage, body, { mode: 0o600 }),
+      });
+    }
+
+    OWNED.installOwned({
+      root,
+      integration: 'cline',
+      operations,
+      force: opts.force,
+      note,
+    });
+
+    results.installed.push('cline');
+  } catch (err) {
+    results.failed.push(['cline', 'copy failed: ' + err.message]);
+    process.stdout.write('\n');
+    return;
+  }
+
+  if (opts.withMcpShrink) {
+    say('  → wiring caveman-shrink MCP proxy (--with-mcp-shrink)');
+    const r = installClineMcpShrink(ctx);
+    if (r.kind === 'ok')   results.installed.push('caveman-shrink (cline)');
+    if (r.kind === 'skip') results.skipped.push(['caveman-shrink (cline)', r.why]);
+    if (r.kind === 'fail') results.failed.push(['caveman-shrink (cline)', r.why]);
+  }
+
+  process.stdout.write('\n');
+}
+
+// Cline's own MCP registry. `cline mcp add` opens an interactive wizard unless
+// --yes is passed, which would hang a `curl | bash` install; --yes is therefore
+// mandatory here, not optional. Same npm probe and same clean-skip policy as the
+// Claude Code path in installMcpShrink().
+function installClineMcpShrink(ctx) {
+  const { note, warn, opts } = ctx;
+  const probe = captureSpawn('npm', ['view', MCP_SHRINK_PKG, 'name']);
+  if (probe.status !== 0) {
+    warn(`    'npm view ${MCP_SHRINK_PKG}' returned no metadata — registry unreachable or package missing.`);
+    note('    Skipping registration. Re-run --with-mcp-shrink when the registry is reachable.');
+    return { kind: 'skip', why: 'npm registry probe failed' };
+  }
+  const help = captureSpawn('cline', ['mcp', '--help']);
+  if (help.status !== 0) {
+    note("    'cline mcp add' not available on this CLI (VS Code-only install?).");
+    note('    Add caveman-shrink through the Cline MCP settings UI instead.');
+    return { kind: 'skip', why: 'cline mcp CLI unavailable' };
+  }
+  const upstream = opts.withMcpShrink;
+  const r = runSpawn(
+    'cline',
+    ['mcp', 'add', 'caveman-shrink', '--yes', '--transport', 'stdio', '--', 'npx', '-y', MCP_SHRINK_PKG, ...upstream],
+    null, opts.dryRun
+  );
+  if (spawnOk(r)) {
+    note(`    registered, wrapping: ${upstream.join(' ')}`);
+    note('    `cline mcp remove caveman-shrink` to drop it.');
+    note(`    Docs: https://github.com/${REPO}/tree/main/src/mcp-servers/caveman-shrink`);
+    return { kind: 'ok' };
+  }
+  return { kind: 'fail', why: 'cline mcp add failed' };
 }
 
 // ── opencode native install ───────────────────────────────────────────────
@@ -1602,6 +1774,22 @@ function uninstall(ctx) {
     }
   }
 
+  // Cline native install — same journal/digest contract as opencode and Hermes.
+  // Its own lane rather than PROVIDER_SKILLS: cline also owns a global rule
+  // file and three agent presets, which that helper does not model.
+  try {
+    const clineOwnership = OWNED.uninstallOwned({
+      root: clineConfigDir(),
+      integration: 'cline',
+      dryRun: opts.dryRun,
+      note,
+      warn,
+    });
+    if (clineOwnership.hadJournal) ok('  pruned owned caveman skills, rule and agents from Cline');
+  } catch (error) {
+    warn(`  Cline ownership journal invalid; left integration untouched: ${error.message}`);
+  }
+
   // Per-session state. Keep lifetime savings history unless user removes it.
   const stateFiles = [
     '.caveman-active',
@@ -1654,7 +1842,7 @@ function uninstall(ctx) {
     ok('uninstall done.');
   }
   ok('npx-skills installs (Cursor/Windsurf/etc.) — remove via your IDE\'s skill manager');
-  ok('per-repo init files (.cursor/, .windsurf/, AGENTS.md) — remove with your editor');
+  ok('per-repo init files (.cursor/, .windsurf/, .clinerules/, AGENTS.md) — remove with your editor');
   return cleanupFailed ? 1 : 0;
 }
 
@@ -1804,6 +1992,7 @@ async function main() {
     if (prov.id === 'opencode') { installOpencode(ctx); continue; }
     if (prov.id === 'openclaw') { installOpenclaw(ctx); continue; }
     if (prov.id === 'hermes')   { installHermes(ctx); continue; }
+    if (prov.id === 'cline')    { installCline(ctx); continue; }
     if (prov.profile || PROVIDER_SKILLS.usesNativeSkills(prov.id)) { installViaSkills(ctx, prov); continue; }
   }
 

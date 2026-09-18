@@ -30,7 +30,9 @@ function freshHome() {
 
 function runInstaller(args, hermesHome) {
   return spawnSync(process.execPath, [INSTALLER, ...args, '--config-dir', path.join(hermesHome, '.claude-test'), '--non-interactive', '--no-mcp-shrink'], {
-    env: { ...process.env, HERMES_HOME: hermesHome, NO_COLOR: '1' },
+    // CLINE_DIR pinned for the same reason HERMES_HOME is: `--uninstall` prunes
+    // every native lane, and the cline lane resolves ~/.cline from os.homedir().
+    env: { ...process.env, HERMES_HOME: hermesHome, CLINE_DIR: path.join(hermesHome, 'cline-sandbox'), NO_COLOR: '1' },
     encoding: 'utf8',
   });
 }

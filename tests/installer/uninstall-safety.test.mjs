@@ -99,7 +99,11 @@ function fakeCavemanDir(root, record) {
 
 function runInstaller(args, configDir, extraEnv) {
   return spawnSync(process.execPath, [INSTALLER, ...args, '--config-dir', configDir, '--non-interactive', '--no-mcp-shrink'], {
-    env: { ...process.env, CLAUDE_CONFIG_DIR: configDir, NO_COLOR: '1', ...extraEnv },
+// CLINE_DIR / HERMES_HOME are pinned under the throwaway config dir so a real
+// `--uninstall` in these tests cannot reach the developer's own ~/.cline or
+// ~/.hermes install. Only CLAUDE_CONFIG_DIR used to be sandboxed, and the
+// native lanes resolve their roots from os.homedir(), not from --config-dir.
+    env: { ...process.env, CLAUDE_CONFIG_DIR: configDir, CLINE_DIR: path.join(configDir, 'cline-sandbox'), HERMES_HOME: path.join(configDir, 'hermes-sandbox'), NO_COLOR: '1', ...extraEnv },
     encoding: 'utf8',
   });
 }
