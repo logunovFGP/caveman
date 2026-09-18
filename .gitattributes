@@ -5,3 +5,13 @@
 
 # Byte-exact fixture committed with CRLF on purpose — never convert.
 engine/evals/fixtures/terminal_session.txt -text
+
+# These three sources hold a raw NUL byte on purpose: a composite map key, a
+# replacement sentinel, and a rejected-input test case. Git calls any file with
+# a NUL binary, which costs them line-by-line diffs in review (the EOL detector
+# looks for a NUL anywhere, the diff detector only in the first ~8000 bytes, so
+# two of the three render as `Bin` and one does not). `diff` forces text diff
+# back on. They are already LF; nothing here converts anything.
+packages/shared/contracts/scripts/validate-continuous-improvement.mjs diff
+src/mcp-servers/caveman-shrink/compress.js diff
+tests/hooks/caveman-config.test.mjs diff
