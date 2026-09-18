@@ -521,6 +521,30 @@ def verify_compress_cli() -> None:
     print("Compress CLI skip/error paths OK")
 
 
+def verify_cline_sandbox_pins() -> None:
+    """Both Cline roots must be sandboxed together in the installer tests.
+
+    The lane owns two roots and only one of them is under $CLINE_DIR: skills
+    live there, while the always-on rule and the subagent presets live under
+    the documents root. A suite that pins the first and forgets the second runs
+    a live `--uninstall` against the developer's own ~/Documents/Cline. That is
+    not hypothetical - it deleted one, which is why CLINE_DOCUMENTS_DIR exists.
+    """
+    section("Cline sandbox pins")
+    tests = Path("tests/installer")
+    offenders = [
+        path.as_posix()
+        for path in sorted(tests.glob("*.test.mjs"))
+        if "CLINE_DIR:" in path.read_text(encoding="utf-8")
+        and "CLINE_DOCUMENTS_DIR:" not in path.read_text(encoding="utf-8")
+    ]
+    ensure(
+        not offenders,
+        "these suites pin CLINE_DIR without CLINE_DOCUMENTS_DIR: " + ", ".join(offenders),
+    )
+    print("Every suite that sandboxes $CLINE_DIR sandboxes the documents root too")
+
+
 def verify_hook_install_flow() -> None:
     section("Claude Hook Flow")
 
@@ -793,6 +817,7 @@ def main() -> int:
         verify_powershell_static,
         verify_compress_fixtures,
         verify_compress_cli,
+        verify_cline_sandbox_pins,
         verify_hook_install_flow,
     ]
 

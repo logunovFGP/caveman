@@ -49,6 +49,7 @@ function runInstaller(args, env) {
   // this a test run reaches the developer's own ~/.cline and ~/.hermes install.
   const sandboxed = {
     CLINE_DIR: path.join(env.XDG_CONFIG_HOME, 'cline-sandbox'),
+    CLINE_DOCUMENTS_DIR: path.join(env.XDG_CONFIG_HOME, 'cline-documents-sandbox'),
     HERMES_HOME: path.join(env.XDG_CONFIG_HOME, 'hermes-sandbox'),
     ...env,
   };

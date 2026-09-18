@@ -65,8 +65,10 @@ function runInstaller(args, home) {
     env: {
       ...process.env,
       CLINE_DIR: clineDir(home),
-      // os.homedir() reads HOME on POSIX and USERPROFILE on Windows; the
-      // documents root is derived from it and ignores CLINE_DIR entirely.
+      // The documents root is not under $CLINE_DIR, so it needs its own pin.
+      // HOME/USERPROFILE stay overridden as belt and braces: they are what an
+      // unset CLINE_DOCUMENTS_DIR resolves against.
+      CLINE_DOCUMENTS_DIR: clineDocsDir(home),
       HOME: home,
       USERPROFILE: home,
       NO_COLOR: '1',

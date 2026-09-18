@@ -882,7 +882,14 @@ function clineConfigDir() {
 // AgentConfigLoader.ts joins os.homedir() directly, and the rules directory
 // falls back to the same homedir path when the VS Code documents lookup fails.
 function clineDocumentsDir() {
-  return path.join(os.homedir(), 'Documents', 'Cline');
+  // $CLINE_DOCUMENTS_DIR is ours, not cline's: cline resolves this root through
+  // the VS Code documents path, which is not always ~/Documents (localized
+  // names, OneDrive/iCloud redirection). It also makes the root sandboxable —
+  // deriving it from os.homedir() alone meant a test running a real
+  // `--uninstall` reached the developer's own ~/Documents/Cline, which is
+  // exactly what happened once (#(this commit)).
+  const override = (process.env.CLINE_DOCUMENTS_DIR || '').trim();
+  return override || path.join(os.homedir(), 'Documents', 'Cline');
 }
 
 // One-time migration off the old wrong root. Entries under rules/ or agents/ in

@@ -24,7 +24,7 @@ function run(args) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'caveman-repo-'));
   try {
     return spawnSync(process.execPath, [INSTALLER, ...args, '--non-interactive', '--no-mcp-shrink'], {
-      env: { ...process.env, HOME: home, USERPROFILE: home, CLINE_DIR: path.join(home, '.cline'), NO_COLOR: '1' },
+      env: { ...process.env, HOME: home, USERPROFILE: home, CLINE_DIR: path.join(home, '.cline'), CLINE_DOCUMENTS_DIR: path.join(home, 'Documents', 'Cline'), NO_COLOR: '1' },
       encoding: 'utf8',
     });
   } finally {

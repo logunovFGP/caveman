@@ -24,7 +24,7 @@ function run(args, { input = '' } = {}) {
       // stdin is a pipe here, exactly like curl|bash.
       input,
       timeout: 60_000,
-      env: { ...process.env, HOME: home, USERPROFILE: home, CLINE_DIR: path.join(home, '.cline'), NO_COLOR: '1' },
+      env: { ...process.env, HOME: home, USERPROFILE: home, CLINE_DIR: path.join(home, '.cline'), CLINE_DOCUMENTS_DIR: path.join(home, 'Documents', 'Cline'), NO_COLOR: '1' },
       encoding: 'utf8',
     });
   } finally {

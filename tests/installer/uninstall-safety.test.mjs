@@ -103,7 +103,7 @@ function runInstaller(args, configDir, extraEnv) {
 // `--uninstall` in these tests cannot reach the developer's own ~/.cline or
 // ~/.hermes install. Only CLAUDE_CONFIG_DIR used to be sandboxed, and the
 // native lanes resolve their roots from os.homedir(), not from --config-dir.
-    env: { ...process.env, CLAUDE_CONFIG_DIR: configDir, CLINE_DIR: path.join(configDir, 'cline-sandbox'), HERMES_HOME: path.join(configDir, 'hermes-sandbox'), NO_COLOR: '1', ...extraEnv },
+    env: { ...process.env, CLAUDE_CONFIG_DIR: configDir, CLINE_DIR: path.join(configDir, 'cline-sandbox'), CLINE_DOCUMENTS_DIR: path.join(configDir, 'cline-documents-sandbox'), HERMES_HOME: path.join(configDir, 'hermes-sandbox'), NO_COLOR: '1', ...extraEnv },
     encoding: 'utf8',
   });
 }
