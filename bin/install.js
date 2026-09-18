@@ -669,7 +669,7 @@ function installGemini(ctx) {
     if (!opts.dryRun) {
       try {
         fs.mkdirSync(scratchParent, { recursive: true });
-        cwd = fs.mkdtempSync(path.join(scratchParent, 'gemini-install-'));
+        cwd = trackTempPath(fs.mkdtempSync(path.join(scratchParent, 'gemini-install-')));
       } catch (e) {
         results.failed.push(['gemini', `could not create scratch directory below ${scratchParent}: ${e.message}`]);
         process.stdout.write('\n');
@@ -679,7 +679,7 @@ function installGemini(ctx) {
     try {
       r = runSpawn('gemini', ['extensions', 'install', url, '--consent'], { env, cwd }, opts.dryRun);
     } finally {
-      if (cwd) { try { fs.rmSync(cwd, { recursive: true, force: true }); } catch (_) {} }
+      releaseTempPath(cwd);
     }
   }
   if (spawnOk(r)) results.installed.push('gemini');
@@ -1228,8 +1228,11 @@ function installOpencode(ctx) {
 
     results.installed.push('opencode');
   } catch (e) {
-    warn('  opencode install failed: ' + (e && e.message || e));
-    results.failed.push(['opencode', (e && e.message) || 'unknown error']);
+    const why = (e && e.message) || String(e);
+    warn('  opencode install failed: ' + why);
+    const hint = failureHint(why);
+    if (hint) note(hint);
+    results.failed.push(['opencode', why || 'unknown error']);
   }
   process.stdout.write('\n');
 }
@@ -1459,8 +1462,75 @@ async function runInit(ctx) {
     warn('  ' + e.message);
     return false;
   } finally {
-    try { fs.rmSync(scratch, { recursive: true, force: true }); } catch (_) { /* best effort */ }
+    releaseTempPath(scratch);
   }
+}
+
+// ── Interrupt-safe cleanup ────────────────────────────────────────────────
+// Node delivers signals on the event loop, so a ^C that lands while one of the
+// synchronous install sections is running (owned-install's stage/displaced
+// rename dance, openclaw's skill + SOUL.md write pair) is deferred until that
+// section — and its rollback `finally` — has finished. Those paths therefore
+// need nothing from us; that deferral IS the graceful exit.
+//
+// What deferral cannot cover is a scratch directory that outlives an `await`:
+// the hook/init downloads and the gemini scratch dir below ~/.caveman/tmp. A
+// signal there kills the process with the `finally` still pending, leaving the
+// directory behind. Those two register here so the handler removes them.
+const TEMP_PATHS = new Set();
+
+function trackTempPath(p) {
+  TEMP_PATHS.add(p);
+  return p;
+}
+
+// Normal-path counterpart to the handler: remove now, stop tracking.
+function releaseTempPath(p) {
+  if (!p) return;
+  TEMP_PATHS.delete(p);
+  try { fs.rmSync(p, { recursive: true, force: true }); } catch (_) { /* best effort */ }
+}
+
+function purgeTempPaths() {
+  for (const p of TEMP_PATHS) {
+    try { fs.rmSync(p, { recursive: true, force: true }); } catch (_) { /* best effort */ }
+  }
+  TEMP_PATHS.clear();
+}
+
+// Shell convention: 128 + signal number.
+const SIGNAL_EXIT = { SIGINT: 130, SIGTERM: 143, SIGHUP: 129 };
+let interrupted = false;
+
+// Node defers a signal callback while synchronous install work runs — that is
+// what keeps a ^C from landing mid-rename. The flip side: a promise
+// continuation (main()'s own `.then(process.exit)`) would run BEFORE the
+// pending callback, and the run would finish as if nothing happened. One turn
+// of the event loop between providers lets the handler land instead.
+const yieldToSignals = () => new Promise(setImmediate);
+
+function installSignalHandlers() {
+  for (const sig of Object.keys(SIGNAL_EXIT)) {
+    // Windows raises SIGINT/SIGTERM only; SIGHUP is accepted but never fires.
+    process.on(sig, () => {
+      // Second signal while cleanup is still running: the user wants out now.
+      if (interrupted) process.exit(SIGNAL_EXIT[sig]);
+      interrupted = true;
+      process.stderr.write(`\n🪨 interrupted (${sig}) — removing scratch files, nothing left half-written\n`);
+      purgeTempPaths();
+      process.exit(SIGNAL_EXIT[sig]);
+    });
+  }
+}
+
+// Symlinked config directories (dotfile managers, Syncthing, container mounts)
+// trip the ownership guards in bin/lib/owned-install.js and bin/lib/openclaw.js.
+// Refusing is deliberate — caveman never writes through a link it does not own
+// — but the bare error tells the user nothing about what to do next.
+function failureHint(message) {
+  if (!/symbolic.link|symlink/i.test(String(message))) return null;
+  return '  hint: that path is a symlink. caveman never writes through one. '
+       + 'Replace it with a real directory, or skip this agent (--only <other-agent>).';
 }
 
 // privateTmpDir returns a fresh 0700 directory with an unguessable name. The old
@@ -1469,7 +1539,7 @@ async function runInit(ctx) {
 // symlink — so the installer wrote through it and, for the init script, then
 // EXECUTED what landed there.
 function privateTmpDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'caveman-'));
+  return trackTempPath(fs.mkdtempSync(path.join(os.tmpdir(), 'caveman-')));
 }
 
 // ── HTTPS download via stdlib ─────────────────────────────────────────────
@@ -1524,7 +1594,7 @@ async function loadRemoteHookChecksums() {
   } catch (_) {
     return null;
   } finally {
-    try { fs.rmSync(scratch, { recursive: true, force: true }); } catch (_) { /* best effort */ }
+    releaseTempPath(scratch);
   }
 }
 
@@ -1940,6 +2010,7 @@ async function main() {
   if (opts.help) { printHelp(); return 0; }
   if (opts.listOnly) { printList(opts.noColor); return 0; }
 
+  installSignalHandlers();
   checkWslWindowsNode();
   checkNodeVersion();
 
@@ -1979,6 +2050,7 @@ async function main() {
   // from firing `npx skills add ...` against agents the user never installed
   // just because some other tool created `~/.foo` along the way.
   for (const prov of PROVIDERS) {
+    await yieldToSignals(); // ^C during a provider stops the run here, not 35 providers later
     if (!want(prov.id)) continue;
     if (prov.soft && !explicit(prov.id)) continue;
     // Auto-detect mode: skip providers we can't see. With --only <id> the user
@@ -1987,19 +2059,36 @@ async function main() {
     // no repo clone is available; openclaw bails when the workspace dir is
     // missing without --force).
     if (!explicit(prov.id) && !detectMatch(prov.detect)) continue;
-    if (prov.id === 'claude')   { await installClaude(ctx); continue; }
-    if (prov.id === 'gemini')   { installGemini(ctx); continue; }
-    if (prov.id === 'opencode') { installOpencode(ctx); continue; }
-    if (prov.id === 'openclaw') { installOpenclaw(ctx); continue; }
-    if (prov.id === 'hermes')   { installHermes(ctx); continue; }
-    if (prov.id === 'cline')    { installCline(ctx); continue; }
-    if (prov.profile || PROVIDER_SKILLS.usesNativeSkills(prov.id)) { installViaSkills(ctx, prov); continue; }
+    // Per-provider containment. Most installers report their own failures via
+    // results.failed, but the native lanes bubble hard errors up instead — e.g.
+    // openclaw throws `refusing non-directory or symlink` when the workspace
+    // skills dir is a symlink. That used to escape main() and abort the run, so
+    // a symlinked ~/.openclaw took every provider BELOW it in PROVIDERS order
+    // (cline, cursor, windsurf, codex, copilot, …) down with it.
+    try {
+      if (prov.id === 'claude')   { await installClaude(ctx); continue; }
+      if (prov.id === 'gemini')   { installGemini(ctx); continue; }
+      if (prov.id === 'opencode') { installOpencode(ctx); continue; }
+      if (prov.id === 'openclaw') { installOpenclaw(ctx); continue; }
+      if (prov.id === 'hermes')   { installHermes(ctx); continue; }
+      if (prov.id === 'cline')    { installCline(ctx); continue; }
+      if (prov.profile || PROVIDER_SKILLS.usesNativeSkills(prov.id)) { installViaSkills(ctx, prov); continue; }
+    } catch (error) {
+      const why = (error && error.message) || String(error);
+      ctx.warn(`  ${prov.id} install failed: ${why}`);
+      const hint = failureHint(why);
+      if (hint) ctx.note(hint);
+      ctx.results.failed.push([prov.id, why]);
+      process.stdout.write('\n');
+    }
   }
 
   // No detected target means no skill installation. Upstream --all (and --yes
   // with no detected agents) installs into every profile, contradicting our
   // promise to skip agents the user does not have. --only remains the explicit
   // way to select an agent that cannot be detected.
+
+  await yieldToSignals(); // a signal that arrived during the last provider still wins
 
   // Per-repo init
   if (opts.withInit) {
