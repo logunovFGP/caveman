@@ -47,7 +47,7 @@ const MIN_NODE_MAJOR = 18;
 // the new tag on every release (CI release step) AFTER regenerating
 // src/hooks/checksums.sha256 so the integrity manifest matches the ref.
 // Overridable via CAVEMAN_REF for testing against a branch.
-const PINNED_REF = process.env.CAVEMAN_REF || 'v2.7.0-fork.3';
+const PINNED_REF = process.env.CAVEMAN_REF || 'v2.7.0-fork.4';
 const OPENCLAW_SKILL_VERSION = /^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(PINNED_REF)
   ? PINNED_REF.replace(/^v/, '')
   : undefined;
@@ -2029,29 +2029,71 @@ function uninstall(ctx) {
 }
 
 // ── Interactive prompt (TTY-only) ─────────────────────────────────────────
-// rl.question's callback never fires if stdin reaches EOF first — the promise
-// stays pending, main() stops awaiting work it will never get, the event loop
-// drains, and node exits 0 having installed nothing. That is worse than the
-// hang it looks like, because the exit code says success. Any prompt therefore
-// resolves on 'close' too, and an empty answer means "take the default".
+// Where to ask. Gating on process.stdin.isTTY is wrong for the headline install
+// command: under `curl … | bash` stdin IS the script, so every prompt silently
+// self-skipped and the one-liner could never offer anything. The user is still
+// sitting at a terminal, reachable through the controlling tty — the same trick
+// rustup and nvm use. Returns null only when there is genuinely nobody there
+// (CI, cron, a detached container), where prompting would hang forever.
+function openTerminal() {
+  if (process.stdin.isTTY && process.stdout.isTTY) {
+    return { input: process.stdin, output: process.stdout, close() {} };
+  }
+  if (process.env.CI) return null;
+  const device = process.platform === 'win32' ? 'CONIN$' : '/dev/tty';
+  let fd;
+  try {
+    fd = fs.openSync(device, 'r+');
+    return {
+      input: fs.createReadStream(null, { fd, autoClose: false }),
+      output: fs.createWriteStream(null, { fd, autoClose: false }),
+      close() { try { fs.closeSync(fd); } catch (_) { /* already gone */ } },
+    };
+  } catch (_) {
+    if (fd !== undefined) { try { fs.closeSync(fd); } catch (_) {} }
+    return null;
+  }
+}
+
+// An unattended run that still has a controlling terminal (a tty in automation)
+// must not block forever, so every question has a deadline and falls back to
+// the default answer.
+const PROMPT_TIMEOUT_MS = 120000;
+
+// rl.question's callback never fires if the input reaches EOF first — the
+// promise stays pending, main() stops awaiting work it will never get, the
+// event loop drains, and node exits 0 having installed nothing. That is worse
+// than the hang it looks like, because the exit code says success. Any prompt
+// therefore resolves on 'close' and on the deadline too, and an empty answer
+// means "take the default".
 function askOnce(rl, question) {
   return new Promise((resolve) => {
     let settled = false;
-    const finish = (value) => { if (!settled) { settled = true; resolve(value || ''); } };
+    let timer;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value || '');
+    };
+    timer = setTimeout(() => finish(''), PROMPT_TIMEOUT_MS);
+    if (typeof timer.unref === 'function') timer.unref();
     rl.once('close', () => finish(''));
     rl.question(question, finish);
   });
 }
 
 async function promptForOnly(detected) {
-  if (!process.stdin.isTTY || !process.stdout.isTTY) return null;
   if (detected.length === 0) return null;
-  process.stdout.write('\nDetected agents:\n');
-  detected.forEach((p, i) => process.stdout.write(`  [${i + 1}] ${p.label}\n`));
-  process.stdout.write('  [a] all   [q] quit\n');
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const term = openTerminal();
+  if (!term) return null;
+  term.output.write('\nDetected agents:\n');
+  detected.forEach((p, i) => term.output.write(`  [${i + 1}] ${p.label}\n`));
+  term.output.write('  [a] all   [q] quit\n');
+  const rl = readline.createInterface({ input: term.input, output: term.output });
   const ans = await askOnce(rl, 'Install which? (default: all) ');
   rl.close();
+  term.close();
   const t = (ans || '').trim().toLowerCase();
   if (t === 'q') process.exit(0);
   if (t === '' || t === 'a' || t === 'all') return null;
@@ -2065,21 +2107,22 @@ async function promptForOnly(detected) {
 const MCP_SHRINK_PROVIDERS = new Set(['claude', 'cline', 'opencode']);
 
 // caveman-shrink used to be reachable only through a flag nobody discovers, so
-// it shipped off for everyone. Ask instead — but only on a real terminal, and
-// only when the user has not already decided with a flag. curl|bash has no TTY
-// on stdin (the script IS stdin), so that path keeps the old silent default
-// rather than hanging on a question no one can answer.
+// it shipped off for everyone. Ask instead — on any controlling terminal, and
+// only when the user has not already decided with a flag. openTerminal() is
+// what makes `curl … | bash` work: stdin there is the script, so the question
+// goes to /dev/tty.
 async function promptForMcpShrink(providerIds, noColor) {
-  if (!process.stdin.isTTY || !process.stdout.isTTY) return false;
   if (!providerIds.some((id) => MCP_SHRINK_PROVIDERS.has(id))) return false;
+  const term = openTerminal();
+  if (!term) return false;
 
   const c = makeChalk(noColor);
-  process.stdout.write('\n' + c.orange('caveman-shrink — compress MCP tool output before it reaches the model') + '\n');
-  process.stdout.write(c.dim('  It is a proxy: it wraps ONE upstream MCP server, so it needs that\n'));
-  process.stdout.write(c.dim('  server\'s command. Skip this and add it later with\n'));
-  process.stdout.write(c.dim('  --with-mcp-shrink="<upstream cmd>".\n'));
+  term.output.write('\n' + c.orange('caveman-shrink — compress MCP tool output before it reaches the model') + '\n');
+  term.output.write(c.dim('  It is a proxy: it wraps ONE upstream MCP server, so it needs that\n'));
+  term.output.write(c.dim('  server\'s command. Skip this and add it later with\n'));
+  term.output.write(c.dim('  --with-mcp-shrink="<upstream cmd>".\n'));
 
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const rl = readline.createInterface({ input: term.input, output: term.output });
   const ask = (q) => askOnce(rl, q);
   try {
     const yes = (await ask('Register caveman-shrink? [y/N] ')).trim().toLowerCase();
@@ -2102,6 +2145,7 @@ async function promptForMcpShrink(providerIds, noColor) {
     }
   } finally {
     rl.close();
+    term.close();
   }
 }
 
@@ -2117,7 +2161,7 @@ function printList(noColor) {
   }
   process.stdout.write('\n');
   process.stdout.write(c.dim('  Defaults: --with-hooks ON, --with-init OFF.\n'));
-  process.stdout.write(c.dim('  mcp-shrink: asked interactively (needs an upstream command); off on a pipe.\n'));
+  process.stdout.write(c.dim('  mcp-shrink: asked whenever a terminal exists, curl|bash included.\n'));
   process.stdout.write(c.dim('  --all = hooks + init; it never answers the mcp-shrink question for you.\n'));
   process.stdout.write(c.dim('  --minimal turns hooks + init + mcp-shrink off.\n'));
 }
@@ -2154,8 +2198,11 @@ FLAGS
                         backslashes stay literal. A JSON argv array also works.
                         Example: --with-mcp-shrink="npx @modelcontextprotocol/server-filesystem /tmp"
   --no-mcp-shrink       Answer the caveman-shrink question with no, up front.
-                        On a terminal the installer asks; with no TTY (curl|bash,
-                        --non-interactive, --dry-run) it stays off unasked.
+                        The installer asks whenever a controlling terminal
+                        exists — including curl | bash, where the question goes
+                        to /dev/tty because stdin is the script. It stays
+                        off unasked only with --non-interactive, --dry-run,
+                        --minimal, $CI, or no terminal at all.
   --uninstall, -u       Remove caveman from this machine.
   --repo <owner>/<name> Pull the remote lanes (Claude Code marketplace, Gemini
                         extension, npx skills, raw hook downloads) from this

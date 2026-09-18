@@ -9,16 +9,16 @@ If just want it to work, run the one-liner. If want to know what gets touched, s
 **macOS / Linux / WSL / Git Bash**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/logunovFGP/caveman/v2.7.0-fork.3/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/logunovFGP/caveman/v2.7.0-fork.4/install.sh | bash
 ```
 
 **Windows (PowerShell 5.1+)**
 
 ```powershell
-irm https://raw.githubusercontent.com/logunovFGP/caveman/v2.7.0-fork.3/install.ps1 | iex
+irm https://raw.githubusercontent.com/logunovFGP/caveman/v2.7.0-fork.4/install.ps1 | iex
 ```
 
-> Piping a script straight into a shell runs it sight-unseen. If you'd rather read it first, download then run: `curl -fsSL https://raw.githubusercontent.com/logunovFGP/caveman/v2.7.0-fork.3/install.sh -o install.sh` (review it) `&& bash install.sh`. Bootstrap, package, and hook downloads stay pinned to that immutable release. Set `CAVEMAN_REF` only when intentionally testing another ref.
+> Piping a script straight into a shell runs it sight-unseen. If you'd rather read it first, download then run: `curl -fsSL https://raw.githubusercontent.com/logunovFGP/caveman/v2.7.0-fork.4/install.sh -o install.sh` (review it) `&& bash install.sh`. Bootstrap, package, and hook downloads stay pinned to that immutable release. Set `CAVEMAN_REF` only when intentionally testing another ref.
 
 What it does:
 
@@ -31,7 +31,7 @@ What it does:
 Want to preview before installing? Use `--dry-run`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/logunovFGP/caveman/v2.7.0-fork.3/install.sh | bash -s -- --dry-run
+curl -fsSL https://raw.githubusercontent.com/logunovFGP/caveman/v2.7.0-fork.4/install.sh | bash -s -- --dry-run
 ```
 
 ## Per-agent install
@@ -128,7 +128,7 @@ Useful flags:
 | `--only <id>` | One agent only. Repeatable: `--only claude --only cursor`. |
 | `--dry-run` | Print every command. Write nothing. |
 | `--with-init` | Drop always-on rule files into the current repo (`.cursor/`, `.windsurf/`, `.clinerules/`, `.github/copilot-instructions.md`, `.opencode/AGENTS.md`, `AGENTS.md`) and, if OpenClaw is on the box, append the bootstrap block to `~/.openclaw/workspace/SOUL.md`. |
-| `--with-mcp-shrink="<upstream cmd>"` | Register `caveman-shrink` MCP proxy wrapping the given upstream MCP server, in Claude Code and Cline. **Off by default.** A value is required — caveman-shrink is a proxy and exits immediately without one. Example: `--with-mcp-shrink="npx @modelcontextprotocol/server-filesystem /tmp"`. Within the value, single or double quotes group paths containing spaces; backslashes stay literal. A JSON array of strings also works when arguments contain quotes. No shell expansion occurs. |
+| `--with-mcp-shrink="<upstream cmd>"` | Answer the caveman-shrink question ahead of time. The installer otherwise ASKS whenever it has a terminal — `curl … | bash` included, because the question goes to `/dev/tty` rather than stdin. Registers the `caveman-shrink` MCP proxy wrapping the given upstream MCP server, in Claude Code and Cline. **Off by default.** A value is required — caveman-shrink is a proxy and exits immediately without one. Example: `--with-mcp-shrink="npx @modelcontextprotocol/server-filesystem /tmp"`. Within the value, single or double quotes group paths containing spaces; backslashes stay literal. A JSON array of strings also works when arguments contain quotes. No shell expansion occurs. |
 | `--no-mcp-shrink` | Skip MCP-shrink registration. (Default.) |
 | `--with-hooks` / `--no-hooks` | Force-on or force-off the Claude Code hook installer. (Default: on.) |
 | `--repo <owner>/<name>` | Pull the remote lanes from a different GitHub repo — Claude Code marketplace, Gemini extension URL, `npx skills add`, and the raw hook downloads. Use it to install from a fork: `--repo myuser/caveman`. Native lanes (cline, opencode, openclaw, hermes) always copy from the local clone, so they follow whatever checkout you run. Validated as `owner/name`; anything else exits 2. |
