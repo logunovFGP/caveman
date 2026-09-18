@@ -106,7 +106,7 @@ function hooksManifestIsOurs(p) {
 function parseArgs(argv) {
   const opts = {
     dryRun: false, force: false,
-    withHooks: 'auto', withInit: false, withMcpShrink: false,
+    withHooks: 'auto', withInit: false, withMcpShrink: false, mcpShrinkExplicit: false,
     all: false, minimal: false, listOnly: false, noColor: false,
     only: [], uninstall: false, nonInteractive: false,
     configDir: null, help: false,
@@ -124,6 +124,7 @@ function parseArgs(argv) {
     if (a.startsWith('--with-mcp-shrink=')) {
       const raw = a.slice('--with-mcp-shrink='.length);
       opts.withMcpShrink = upstreamArgs(raw);
+      opts.mcpShrinkExplicit = true;
       continue;
     }
     switch (a) {
@@ -139,6 +140,7 @@ function parseArgs(argv) {
         if (v && !v.startsWith('--')) {
           i++;
           opts.withMcpShrink = upstreamArgs(v);
+          opts.mcpShrinkExplicit = true;
         } else {
           die('error: --with-mcp-shrink requires an upstream command — caveman-shrink\n' +
               '  is a proxy and exits immediately without one. Pass the upstream:\n' +
@@ -146,7 +148,7 @@ function parseArgs(argv) {
         }
         break;
       }
-      case '--no-mcp-shrink': opts.withMcpShrink = false; break;
+      case '--no-mcp-shrink': opts.withMcpShrink = false; opts.mcpShrinkExplicit = true; break;
       case '--repo': {
         const v = argv[i + 1];
         if (!v || v.startsWith('--')) die('error: --repo requires <owner>/<name>, e.g. --repo myuser/caveman');
@@ -187,8 +189,9 @@ function parseArgs(argv) {
   //     settings.json wiring when the plugin manifest already wires the hooks
   //     (duplicate registration fires both per event — issue #392).
   //   • withMcpShrink — caveman-shrink is a proxy that needs an upstream
-  //     command, so there's no sensible "everything on" default (issue #474).
-  //     Opt in explicitly with --with-mcp-shrink="<upstream cmd>".
+  //     command, so there is no value --all could pick for you (issue #474).
+  //     main() asks for it on a TTY instead; the flags stay for scripts and
+  //     for answering ahead of time.
   if (opts.all) { opts.withInit = true; }
   if (opts.minimal) { opts.withHooks = false; opts.withInit = false; opts.withMcpShrink = false; }
   // Validate --only ids against the provider matrix. PROVIDERS is defined later
@@ -621,7 +624,7 @@ async function installClaude(ctx) {
   }
 
   if (opts.withMcpShrink) {
-    say('  → wiring caveman-shrink MCP proxy (--with-mcp-shrink)');
+    say('  → wiring caveman-shrink MCP proxy');
     const r = installMcpShrink(ctx);
     if (r.kind === 'ok')   results.installed.push('caveman-shrink');
     if (r.kind === 'skip') results.skipped.push(['caveman-shrink', r.why]);
@@ -1010,7 +1013,7 @@ function installCline(ctx) {
   }
 
   if (opts.withMcpShrink) {
-    say('  → wiring caveman-shrink MCP proxy (--with-mcp-shrink)');
+    say('  → wiring caveman-shrink MCP proxy');
     const r = installClineMcpShrink(ctx);
     if (r.kind === 'ok')   results.installed.push('caveman-shrink (cline)');
     if (r.kind === 'skip') results.skipped.push(['caveman-shrink (cline)', r.why]);
@@ -1502,8 +1505,9 @@ function installMcpShrink(ctx) {
     note('    src/hooks/README.md to your Claude Code MCP config manually.');
     return { kind: 'skip', why: 'manual config required' };
   }
-  // opts.withMcpShrink is always an array of upstream-cmd tokens by the
-  // time we get here; parseArgs rejects bare --with-mcp-shrink. The proxy
+  // opts.withMcpShrink is always an array of upstream-cmd tokens by the time
+  // we get here: parseArgs rejects bare --with-mcp-shrink, and the interactive
+  // prompt returns false rather than an empty array. The proxy
   // gets `npx -y caveman-shrink <upstream tokens...>` so it has something
   // to wrap.
   const upstream = opts.withMcpShrink;
@@ -2018,6 +2022,20 @@ function uninstall(ctx) {
 }
 
 // ── Interactive prompt (TTY-only) ─────────────────────────────────────────
+// rl.question's callback never fires if stdin reaches EOF first — the promise
+// stays pending, main() stops awaiting work it will never get, the event loop
+// drains, and node exits 0 having installed nothing. That is worse than the
+// hang it looks like, because the exit code says success. Any prompt therefore
+// resolves on 'close' too, and an empty answer means "take the default".
+function askOnce(rl, question) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value) => { if (!settled) { settled = true; resolve(value || ''); } };
+    rl.once('close', () => finish(''));
+    rl.question(question, finish);
+  });
+}
+
 async function promptForOnly(detected) {
   if (!process.stdin.isTTY || !process.stdout.isTTY) return null;
   if (detected.length === 0) return null;
@@ -2025,7 +2043,7 @@ async function promptForOnly(detected) {
   detected.forEach((p, i) => process.stdout.write(`  [${i + 1}] ${p.label}\n`));
   process.stdout.write('  [a] all   [q] quit\n');
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  const ans = await new Promise(res => rl.question('Install which? (default: all) ', res));
+  const ans = await askOnce(rl, 'Install which? (default: all) ');
   rl.close();
   const t = (ans || '').trim().toLowerCase();
   if (t === 'q') process.exit(0);
@@ -2033,6 +2051,51 @@ async function promptForOnly(detected) {
   const picks = t.split(/[\s,]+/).map(s => parseInt(s, 10)).filter(n => n >= 1 && n <= detected.length);
   if (picks.length === 0) return null;
   return picks.map(n => detected[n - 1].id);
+}
+
+// Providers that can actually register the proxy. Asking anyone else to think
+// about MCP middleware they cannot use is noise.
+const MCP_SHRINK_PROVIDERS = new Set(['claude', 'cline', 'opencode']);
+
+// caveman-shrink used to be reachable only through a flag nobody discovers, so
+// it shipped off for everyone. Ask instead — but only on a real terminal, and
+// only when the user has not already decided with a flag. curl|bash has no TTY
+// on stdin (the script IS stdin), so that path keeps the old silent default
+// rather than hanging on a question no one can answer.
+async function promptForMcpShrink(providerIds, noColor) {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) return false;
+  if (!providerIds.some((id) => MCP_SHRINK_PROVIDERS.has(id))) return false;
+
+  const c = makeChalk(noColor);
+  process.stdout.write('\n' + c.orange('caveman-shrink — compress MCP tool output before it reaches the model') + '\n');
+  process.stdout.write(c.dim('  It is a proxy: it wraps ONE upstream MCP server, so it needs that\n'));
+  process.stdout.write(c.dim('  server\'s command. Skip this and add it later with\n'));
+  process.stdout.write(c.dim('  --with-mcp-shrink="<upstream cmd>".\n'));
+
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const ask = (q) => askOnce(rl, q);
+  try {
+    const yes = (await ask('Register caveman-shrink? [y/N] ')).trim().toLowerCase();
+    if (yes !== 'y' && yes !== 'yes') return false;
+
+    const raw = (await ask('  Upstream MCP command (e.g. npx -y @modelcontextprotocol/server-filesystem /tmp): ')).trim();
+    if (!raw) {
+      process.stdout.write(c.dim('  No command given — skipping caveman-shrink.\n'));
+      return false;
+    }
+    try {
+      const parsed = parseCommandArgs(raw);
+      if (!parsed.length) throw new Error('empty command');
+      return parsed;
+    } catch (error) {
+      // A bad answer must not kill an install that is otherwise fine, which is
+      // why this does not go through upstreamArgs() — that one calls die().
+      process.stderr.write(c.red(`  could not parse that command (${error.message}) — skipping caveman-shrink.`) + '\n');
+      return false;
+    }
+  } finally {
+    rl.close();
+  }
 }
 
 // ── --list ─────────────────────────────────────────────────────────────────
@@ -2046,8 +2109,9 @@ function printList(noColor) {
     process.stdout.write(`  ${pad(p.id, 13)} ${pad(p.label, 22)} ${p.mech}${tag}\n`);
   }
   process.stdout.write('\n');
-  process.stdout.write(c.dim('  Defaults: --with-hooks ON, --with-init OFF, --with-mcp-shrink OFF.\n'));
-  process.stdout.write(c.dim('  --all = hooks + init (mcp-shrink needs an upstream — opt in explicitly).\n'));
+  process.stdout.write(c.dim('  Defaults: --with-hooks ON, --with-init OFF.\n'));
+  process.stdout.write(c.dim('  mcp-shrink: asked interactively (needs an upstream command); off on a pipe.\n'));
+  process.stdout.write(c.dim('  --all = hooks + init; it never answers the mcp-shrink question for you.\n'));
   process.stdout.write(c.dim('  --minimal turns hooks + init + mcp-shrink off.\n'));
 }
 
@@ -2076,13 +2140,15 @@ FLAGS
   --no-hooks            Skip the hooks installer.
   --with-init           Write per-repo IDE rule files into \$PWD.
   --with-mcp-shrink="<upstream cmd>"
-                        Claude Code (and opencode): register caveman-shrink MCP
-                        proxy wrapping the given upstream. Default OFF.
-                        caveman-shrink crashes without an upstream, so a value
-                        is required. Quotes group paths containing spaces;
+                        Claude Code, Cline and opencode: register caveman-shrink
+                        MCP proxy wrapping the given upstream, without being
+                        asked. caveman-shrink crashes without an upstream, so a
+                        value is required. Quotes group paths containing spaces;
                         backslashes stay literal. A JSON argv array also works.
                         Example: --with-mcp-shrink="npx @modelcontextprotocol/server-filesystem /tmp"
-  --no-mcp-shrink       Skip MCP shrink. (Default.)
+  --no-mcp-shrink       Answer the caveman-shrink question with no, up front.
+                        On a terminal the installer asks; with no TTY (curl|bash,
+                        --non-interactive, --dry-run) it stays off unasked.
   --uninstall, -u       Remove caveman from this machine.
   --repo <owner>/<name> Pull the remote lanes (Claude Code marketplace, Gemini
                         extension, npx skills, raw hook downloads) from this
@@ -2150,6 +2216,20 @@ async function main() {
 
   const want = (id) => opts.only.length === 0 || opts.only.includes(id);
   const explicit = (id) => opts.only.includes(id);
+
+  // Which providers this run will actually touch — same filter as the loop
+  // below. The shrink question is only worth asking if one of them can host it.
+  const scheduled = PROVIDERS
+    .filter((prov) => want(prov.id))
+    .filter((prov) => !(prov.soft && !explicit(prov.id)))
+    .filter((prov) => explicit(prov.id) || detectMatch(prov.detect))
+    .map((prov) => prov.id);
+
+  // Ask rather than wait to be discovered. --with-mcp-shrink / --no-mcp-shrink
+  // and --minimal are all decisions already made; do not re-ask those.
+  if (!opts.mcpShrinkExplicit && !opts.minimal && !opts.nonInteractive && !opts.dryRun) {
+    opts.withMcpShrink = await promptForMcpShrink(scheduled, opts.noColor);
+  }
 
   // Run installs in declared order. Soft providers (no reliable detect probe)
   // are auto-skipped — user must opt in via `--only <id>`. Stops the installer
